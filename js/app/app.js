@@ -39,7 +39,8 @@ const App = {
       : `<button data-tab="${k}">${Icon.svg(ic, 24)}<span>${l}</span></button>`).join('');
     nav.addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; if (b.dataset.tab === 'ai') this.openAI(); else this.go(b.dataset.tab); });
     Store.on(() => { this.render(); this.scheduleAlerts(); });
-    if (window.SalesStore) SalesStore.load().then(() => { if (this.tab === 'home') this.render(); this.scheduleAlerts(); });   // 홈 영업 카드 · 다시 연락 알림
+    if (typeof SalesStore !== 'undefined') SalesStore.load().then(() => { this.render(); this.scheduleAlerts(); });
+    window.addEventListener('sp:industry', () => { this.demoRetheme(); this.tab = 'home'; this.render(); this.scheduleAlerts(); });   // 업종을 고르거나 바꾸면 홈부터 다시   // 홈 영업 카드 · 다시 연락 알림
     this.render();
     this.scheduleAlerts();
     // 앱을 다시 볼 때 · 한 시간마다 알림을 다시 예약 (켜 둔 채 날짜가 넘어가도 다음 날 알림이 걸리게)
@@ -85,6 +86,12 @@ const App = {
     const ps = Plan.state();
     document.getElementById('tabs').hidden = !ps.active;
     if (!ps.active) { root.innerHTML = demo + `<div class="plan-lock-wrap">${Plan.lockHtml()}</div>`; Plan.bindLock(root); return; }
+    // 업종을 아직 안 골랐으면: 아래 메뉴를 숨기고 업종 고르기 화면부터
+    const first = typeof SalesStore !== 'undefined' && SalesStore.loaded && !SalesStore.data.templateId;
+    document.getElementById('tabs').hidden = !!first;
+    if (first) { root.innerHTML = '<div id="sales-root" class="sp-wrap sp-in-app sp-first"></div>'; Sales.mount(document.getElementById('sales-root')); return; }
+    const noun = typeof Sales !== 'undefined' && SalesStore.data.templateId ? Sales.noun() : '고객';
+    const tabLabel = document.querySelector('#tabs button[data-tab="customers"] span'); if (tabLabel) tabLabel.textContent = noun;
     root.innerHTML = demo + { home: () => this.home(), customers: () => '<div id="sales-root" class="sp-wrap sp-in-app"></div>', chat: () => this.chat(), sos: () => this.sos(), me: () => this.me() }[this.tab]();
     if (this.tab === 'customers') {
       Sales.mount(document.getElementById('sales-root'));
@@ -130,7 +137,7 @@ const App = {
   /** 영업 하루 카드: 오늘 브리핑(규칙으로 만든 요약) + 다시 연락할 고객. 고객 데이터를 아직 못 불러왔으면 비움 */
   salesCards() {
     if (typeof Sales === 'undefined' || !SalesStore.loaded) return '';
-    if (!SalesStore.data.templateId) return `<section class="sp-card sp-home"><h2>어떤 영업을 하세요?</h2><p class="sp-muted">'고객' 탭에서 업종을 고르면 단계 · 항목 · 알림이 맞춰져요</p><button class="sp-btn sp-dark" data-gotab="customers">업종 고르기</button></section>`;
+    if (!SalesStore.data.templateId) return '';   // 업종을 아직 안 골랐으면 render() 가 업종 고르기 화면을 띄움
     const visits = Store.byDate(U.today()).filter(s => s.status !== 'cancelled' && s.category === 'external');   // 오늘 외부 방문
     const due = Sales.due(3), late = due.filter(f => f.overdue), soon = due.filter(f => !f.overdue);
     const first = visits.find(v => U.at(v.date, v.start) > new Date());
@@ -145,11 +152,44 @@ const App = {
     return `<div class="sp-home">
       ${showRep ? `<section class="sp-card"><h2>오늘 마감 보고서 <span class="sp-muted">자동 작성</span></h2><p class="sp-brief">방문 <b>${rep.counts.visits}</b> · 통화 <b>${rep.counts.calls}</b> · 단계 이동 <b>${rep.counts.moves}</b> · 메모 <b>${rep.counts.memos}</b></p><button class="sp-btn sp-dark" data-report style="width:100%;margin-top:8px">보고서 보기 · 보내기</button></section>` : ''}
       <section class="sp-card"><h2>오늘 브리핑 <span class="sp-muted">${U.esc(Sales.templateName())}</span></h2><p class="sp-brief">${line}${tip}</p></section>
+      ${this.typeCards()}
       ${this.routeStops().length >= 2 ? '<section class="sp-card sp-route" id="spRoute"><h2>오늘 동선</h2><p class="sp-muted">동선 계산 중…</p></section>' : ''}
-      ${due.length ? `<section class="sp-card"><h2>다시 연락할 고객 <span class="sp-muted">3일 안</span></h2>
+      ${due.length ? `<section class="sp-card"><h2>다시 연락할 ${U.esc(Sales.noun())} <span class="sp-muted">3일 안</span></h2>
         ${due.slice(0, 4).map(f => `<button class="sp-due ${f.overdue ? 'late' : ''}" data-opencust="${U.esc(f.customerId)}"><b>${U.esc(f.date.slice(5).replace('-', '.'))}</b><span>${U.esc(f.name)} — ${U.esc(f.task)}</span>${f.overdue ? '<em>지남</em>' : ''}</button>`).join('')}
         ${due.length > 4 ? `<button class="sp-btn" data-gotab="customers" style="width:100%;margin-top:6px">${due.length - 4}건 더 보기</button>` : ''}</section>` : ''}
     </div>`;
+  },
+
+  /** 데모: 고른 업종의 예시 고객을 찾아가는 하루로 바꾸기 (실제 계정에서는 아무것도 안 함) */
+  demoRetheme() {
+    if (Store.mode !== 'demo' || typeof Demo === 'undefined' || !SalesStore.data.templateId) return;
+    const t = Templates.get(SalesStore.data.templateId, SalesStore.data.industryName);
+    const mine = SalesStore.data.customers.filter(c => c.templateId === SalesStore.data.templateId);
+    Store.data.schedules = Store.data.schedules.filter(s => !s.demoDay).concat(Demo.dayFor(t, mine, Templates.type(t).id));
+    Store._saveDemo();
+  },
+
+  /** 영업 방식별 홈 카드 — 순회형: 이번 주 들를 곳 · 납품 · 미수금 / 수주형: 예상 수주 · 결정 임박 / 개인형: 만기 · 소개 */
+  typeCards() {
+    const st = Sales.stats(); if (!st) return '';
+    const e = U.esc, d = x => e(String(x).slice(5).replace('-', '.')), won = n => Number(n).toLocaleString('ko-KR');
+    const rows = (list, fn) => list.slice(0, 4).map(x => `<button class="sp-due ${x.overdue ? 'late' : ''}" data-opencust="${e(x.id)}">${fn(x)}</button>`).join('');
+    if (st.type === 'route') return `
+      <section class="sp-card"><h2>이번 주 들를 거래처 <span class="sp-muted">방문 주기 기준 · ${st.visits.length}곳</span></h2>
+        ${st.visits.length ? rows(st.visits, x => `<b>${d(x.date)}</b><span>${e(x.name)}</span>${x.overdue ? '<em>지남</em>' : ''}`) : '<p class="sp-muted">거래처 카드에 방문 주기(매주 · 2주 …)를 넣으면 자동으로 챙겨 드려요</p>'}</section>
+      <div class="sp-kpis">
+        <section class="sp-card"><h2>납품 예정</h2><p class="sp-big">${st.deliveries.length}<small>건 · 3일 안</small></p>${st.deliveries.slice(0, 2).map(x => `<p class="sp-muted small">${d(x.date)} ${e(x.name)}</p>`).join('')}</section>
+        <section class="sp-card"><h2>미수금</h2><p class="sp-big">${won(st.unpaid)}<small>만 원</small></p><p class="sp-muted small">${st.unpaidN}곳</p></section>
+      </div>`;
+    if (st.type === 'b2b') return `
+      <div class="sp-kpis">
+        <section class="sp-card"><h2>진행 중 금액</h2><p class="sp-big">${won(st.pipeline)}<small>만 원</small></p></section>
+        <section class="sp-card"><h2>예상 수주</h2><p class="sp-big">${won(st.weighted)}<small>만 원</small></p><p class="sp-muted small">수주 가능성 반영</p></section>
+      </div>
+      ${st.closing.length ? `<section class="sp-card"><h2>결정 임박 <span class="sp-muted">2주 안</span></h2>${rows(st.closing, x => `<b>${d(x.date)}</b><span>${e(x.name)} · ${won(x.amount)}만 원 · ${x.chance}%</span>`)}</section>` : ''}`;
+    return st.renewals.length || st.referrals ? `
+      ${st.renewals.length ? `<section class="sp-card"><h2>만기 · 갱신 다가옴 <span class="sp-muted">45일 안</span></h2>${rows(st.renewals, x => `<b>${d(x.date)}</b><span>${e(x.name)} — ${e(x.label)}</span>`)}</section>` : ''}
+      ${st.referrals ? `<section class="sp-card"><h2>소개 고리</h2><p class="sp-brief">소개로 온 ${e(st.noun)} <b>${st.referrals}명</b> · 계약 ${st.wins}명 — 소개해 준 분께 감사 연락을 잊지 마세요</p></section>` : ''}` : '';
   },
 
   /** 오늘 장소가 있는 일정 (시간순). 고객 방문이면 고객 주소를 먼저 씀 */
@@ -461,7 +501,7 @@ const App = {
           ${Store.mode === 'supabase' && !Store.companyId ? '<p class="muted small" style="margin:8px 12px">혼자 쓰는 중이에요. 팀장 · 거래처 연락처는 고객 탭에 넣어 두면 통화 기록이 자동으로 남아요.</p>' : person((p.secretaryName || '팀').slice(0, 1), p.secretaryName || '팀장', '팀장', p.secretaryPhone, true)}
           ${row('data-edit="contacts"', '연락처 고치기', '')}</div></section>
         <section class="group"><h2>영업</h2><div class="box">
-          ${row('data-gotab="customers"', '업종 템플릿', typeof Sales !== 'undefined' ? Sales.templateName() : '', '단계 · 기록 칸 · 다시 연락 규칙이 업종에 맞춰져요')}
+          ${row('data-changeind', '업종', typeof Sales !== 'undefined' ? Sales.templateName() : '', typeof Sales !== 'undefined' && SalesStore.data.templateId ? Sales.typeOf().name + ' — 메뉴 · 단계 · 알림이 여기에 맞춰져요' : '')}
           ${row('data-report="1"', '오늘 마감 보고', '', '방문 · 통화 · 단계 변화를 자동으로 정리해 팀장에게 보내요')}
           <div class="set-row static"><span class="l">자동 알림<small>다시 연락할 고객 아침 9시 · 마감 보고 저녁 6시</small></span></div></div></section>
         <section class="group"><h2>알림 · 화면</h2><div class="box">
@@ -759,6 +799,7 @@ const App = {
     on('[data-addprivate]', () => this.addPrivate());
     on('[data-gotab]', b => this.go(b.dataset.gotab));
     on('[data-report]', () => this.openReport());
+    on('[data-changeind]', () => { Sales.startPick(); this.go('customers'); });
     on('[data-opencust]', b => { this._openCust = b.dataset.opencust; this.go('customers'); });
     on('[data-ai]', () => this.openAI());
     on('[data-delprivate]', safe(async el => { if (confirm('이 개인 일정을 삭제할까요?')) { await Store.remove(el.dataset.delprivate); U.toast('삭제했어요'); } }));

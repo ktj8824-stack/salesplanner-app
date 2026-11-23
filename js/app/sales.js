@@ -9,23 +9,38 @@ const Sales = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => U.today();
   const md = d => String(d || '').slice(5).replace('-', '.');
-  let box = null, tab = 0, busy = false;
+  let box = null, tab = 0, busy = false, picking = false;
 
   // 데모에서 처음 그 업종을 고르면 넣어 주는 예시 고객 (가상 이름)
   const SEED = {
     insurance: [['류하나', '소개', -1, { family: '30대 맞벌이 · 자녀 1' }, '1990-02-11'], ['오태민', '상담', -3, { products: '실손' }, '1987-11-20'],
       ['남궁진', '설계', -5, { family: '배우자 · 자녀 2', products: '종신', expiry: '2027-03-01' }, '1984-11-25'], ['표지원', '설계', -9, { products: '암' }, null],
       ['윤보람', '청약', -28, { products: '운전자', referrer: '남궁진' }, null]],
-    auto: [['송유리', '견적', -2, { model: '하이브리드 SUV', payment: '할부' }, null], ['장민석', '문의', 0, { household: 4 }, null], ['고은채', '출고', -29, {}, null]],
-    pharma: [['김민호 원장', '샘플', -6, { dept: '내과' }, null], ['이수진 원장', '방문', -1, { dept: '정형외과' }, null], ['최현우 원장', '처방·도입', -20, {}, null]],
+    auto: [['송유리', '견적', -2, { model: '하이브리드 SUV', payment: '할부' }, null], ['장민석', '문의', 0, { current: '경차 10년' }, null], ['고은채', '출고', -29, { referrer: '송유리' }, null]],
+    finance: [['배서연', '서류', -2, { product: '전세', amountWant: 20000 }, null], ['진우현', '상담', -1, { product: '사업자' }, null]],
+    rental: [['하다은', '설치', -6, { product: '정수기', monthly: 29900 }, null], ['문태호', '상담', -1, { product: '인터넷 · TV' }, null]],
+    edu: [['김지우 학부모', '체험 수업', -1, { student: '중2', subject: '수학' }, null], ['박서준 학부모', '재원', -40, { student: '고1', renew: U.addDays(U.today(), 5) }, null]],
+    interior: [['정하린', '견적', -4, { site: '성수동 32평', budget: 4500 }, null], ['오민재', '실측', 0, { site: '왕십리 24평' }, null]],
     realty: [['피주원', '현장 방문', -1, { area: '성수', budget: 30000 }, null], ['권도영', '문의', 0, { leaseEnd: '2027-01-20' }, null]],
-    b2b: [['청운건설 이재훈 과장', '제안', -5, { items: '안전용품' }, null], ['한결테크', '발굴', -2, {}, null], ['동아정밀', '수주', -25, {}, null]],
+    door: [['유채원', '체험', -3, { skin: '건성' }, '1992-12-02'], ['한소미', '재구매', -20, { bought: '수분 크림', refill: U.addDays(U.today(), 3) }, null]],
+    b2b: [['청운건설 (이재훈 과장)', '제안', -5, { amount: 3200, chance: '50%', closeBy: U.addDays(U.today(), 10), contacts: '이재훈 과장 · 박 상무(결정)' }, null],
+      ['한결테크', '발굴', -2, { amount: 800, chance: '10%' }, null], ['동아정밀', '협상', -8, { amount: 5400, chance: '70%', closeBy: U.addDays(U.today(), 4) }, null], ['미래물산', '수주', -25, { amount: 1500, chance: '90%' }, null]],
+    equipment: [['대성산업', '견적', -6, { amount: 7200, chance: '30%', spec: 'CNC 2대' }, null], ['삼호기계', '방문', -1, { amount: 2000, chance: '10%' }, null]],
+    food: [['성수 한식당', '정기 거래', -6, { cycle: '매주', items: '채소 · 육류', unpaid: 120, owner: '김 사장님' }, null], ['뚝섬 분식', '정기 거래', -15, { cycle: '2주', items: '떡 · 어묵', nextDelivery: U.addDays(U.today(), 1) }, null],
+      ['왕십리 카페', '첫 주문', -3, { cycle: '매주', items: '우유 · 시럽' }, null], ['건대 고깃집', '샘플·견적', -4, { items: '돼지고기' }, null], ['성동 급식소', '신규 발굴', -1, {}, null]],
+    pharma: [['김민호 원장 (내과)', '샘플', -6, { cycle: '2주', dept: '내과' }, null], ['이수진 원장 (정형외과)', '방문', -1, { cycle: '한 달', dept: '정형외과' }, null], ['최현우 원장', '처방·도입', -20, { cycle: '2주', unpaid: 80 }, null]],
+    liquor: [['성수 포차', '정기 거래', -8, { cycle: '매주', items: '소주 · 맥주', unpaid: 60 }, null], ['한강 펍', '시음·제안', -2, { items: '수제 맥주' }, null]],
   };
+  // 직접 만든 업종: 방식별 예시
+  SEED['gen-personal'] = [['예시 고객 A', '상담', -2, {}, null], ['예시 고객 B', '제안', -6, {}, null]];
+  SEED['gen-b2b'] = [['예시 고객사 A', '제안', -4, { amount: 2000, chance: '50%' }, null], ['예시 고객사 B', '발굴', -1, {}, null]];
+  SEED['gen-route'] = [['예시 거래처 A', '정기 거래', -6, { cycle: '매주' }, null], ['예시 거래처 B', '제안', -2, {}, null]];
 
   const S = () => DB.data;
-  const tpl = () => T.get(S().templateId);
+  const tpl = () => T.get(S().templateId, S().industryName);
+  const typeOf = () => T.type(S().templateId ? tpl() : 'gen-personal');
   const mine = () => S().customers.filter(c => c.templateId === S().templateId);
-  const customerWord = t => T.word(t, 'customer').replace(/님$/, '');
+  const customerWord = t => T.type(t).noun;
 
   async function seedDemo(id) {
     if (DB.live() || S().seeded[id]) return;
@@ -50,7 +65,7 @@ const Sales = (() => {
     if (!box || !document.body.contains(box)) return;
     if (!DB.loaded) { box.innerHTML = '<p class="sp-muted" style="padding:24px 0;text-align:center">고객을 불러오는 중…</p>'; return; }
     if (DB.error) { box.innerHTML = `<div class="sp-card"><b>고객을 불러오지 못했어요</b><p class="sp-muted">${esc(DB.error)}</p><button class="sp-btn" data-sp="reload">다시 시도</button></div>`; return; }
-    if (!S().templateId) return renderPick();
+    if (!S().templateId || picking) return renderPick();
     const t = tpl(), list = mine();
     if (tab >= t.stages.length) tab = 0;
     const stage = t.stages[tab];
@@ -60,12 +75,10 @@ const Sales = (() => {
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     box.innerHTML = `
       <header class="sp-head">
-        <div><div class="sp-sub">${esc(t.name)} 템플릿${DB.live() ? '' : ' · 데모 (이 기기에만 저장)'}</div><h1>고객 · 진행 단계</h1></div>
+        <div><div class="sp-sub">${esc(t.name)} 템플릿${DB.live() ? '' : ' · 데모 (이 기기에만 저장)'}</div><h1>${esc(customerWord(t))} · 진행 단계</h1></div>
         <div class="sp-headbtns"><button class="sp-btn" data-sp="import">엑셀로 가져오기</button><button class="sp-btn sp-dark" data-sp="add">+ ${esc(customerWord(t))} 등록</button></div>
       </header>
-      <div class="sp-inds" role="radiogroup" aria-label="업종">
-        ${T.list().map(x => `<button role="radio" aria-checked="${x.id === S().templateId}" class="sp-chip ${x.id === S().templateId ? 'on' : ''}" data-sp="ind" data-id="${x.id}">${esc(x.name)}</button>`).join('')}
-      </div>
+      <p class="sp-indline">${esc(T.type(t).name)} · <b>${esc(t.name)}</b> <button class="sp-link" data-sp="change">업종 바꾸기</button></p>
       <section class="sp-card">
         <h2>다시 연락할 일 <span class="sp-muted">${due.length}건 · 7일 안</span></h2>
         ${due.length ? due.map(f => `<button class="sp-due ${f.overdue ? 'late' : ''}" data-sp="open" data-id="${f.customerId}"><b>${esc(md(f.date))}</b><span>${esc(f.name)} — ${esc(f.task)}</span>${f.overdue ? '<em>지남</em>' : ''}</button>`).join('') : '<p class="sp-muted">가까운 할 일이 없어요</p>'}
@@ -76,7 +89,7 @@ const Sales = (() => {
       </div>
       <div class="sp-list">
         ${rows.length ? rows.map(c => `<button class="sp-row" data-sp="open" data-id="${c.id}"><span class="sp-av">${esc(c.name[0])}</span><span class="sp-rt"><b>${esc(c.name)}</b><small>${esc(summary(t, c))}</small></span><span class="sp-muted">${esc(md(c.stageAt))}~</span></button>`).join('')
-          : `<p class="sp-muted" style="text-align:center;padding:24px 0">'${esc(stage)}' 단계 고객이 없어요</p>`}
+          : `<p class="sp-muted" style="text-align:center;padding:24px 0">'${esc(stage)}' 단계 ${esc(customerWord(t))}이 없어요</p>`}
       </div>`;
   }
 
@@ -85,14 +98,65 @@ const Sales = (() => {
     return f.slice(0, 2).join(' · ') || '항목을 채우면 여기에 보여요';
   }
 
+  /** 업종 고르기 — 영업 방식 3가지로 묶어서. 목록에 없으면 '직접 만들기' (질문 2개) */
+  let pickOpen = null;
   function renderPick() {
+    const TY = T.TYPES;
     box.innerHTML = `
       <div class="sp-pick">
         <small class="sp-step">시작</small>
         <h1>어떤 영업을 하세요?</h1>
-        <p class="sp-muted">고르기만 하면 단계 · 고객 항목 · 알림이 맞춰져요. 나중에 바꿀 수 있어요</p>
-        <div class="sp-grid">${T.list().map(x => `<button class="sp-ind" data-sp="ind" data-id="${x.id}"><b>${esc(x.name)}</b><small>${esc(x.stages.join(' → '))}</small></button>`).join('')}</div>
+        <p class="sp-muted">고르면 메뉴 · 진행 단계 · ${'기록 칸'} · 알림이 그 영업에 맞게 짜여요. 나중에 바꿀 수 있어요.</p>
+        ${Object.values(TY).map(ty => {
+          const list = T.list(ty.id), open = pickOpen === ty.id;
+          const rep = list.find(x => x.rep);
+          return `<section class="sp-type ${open ? 'open' : ''}">
+            <div class="sp-typehead"><b>${esc(ty.name)}</b><small>${esc(ty.desc)}</small></div>
+            <div class="sp-typebody">
+              ${rep ? `<button class="sp-ind rep" data-sp="ind" data-id="${rep.id}"><b>${esc(rep.name)}</b><small>${esc(rep.stages.join(' → '))}</small></button>` : ''}
+              ${open ? list.filter(x => !x.rep).map(x => `<button class="sp-ind" data-sp="ind" data-id="${x.id}"><b>${esc(x.name)}</b><small>${esc(x.stages.join(' → '))}</small></button>`).join('')
+                : `<button class="sp-link sp-more" data-sp="more" data-type="${ty.id}">+ ${esc(list.filter(x => !x.rep).map(x => x.name).join(' · '))}</button>`}
+            </div></section>`;
+        }).join('')}
+        <button class="sp-btn sp-wide" data-sp="custom">목록에 없어요 · 직접 만들기</button>
+        ${S().templateId ? '<button class="sp-link" data-sp="cancelpick" style="margin-top:8px">바꾸지 않고 돌아가기</button>' : ''}
       </div>`;
+  }
+  const picked = () => setTimeout(() => window.dispatchEvent(new Event('sp:industry')), 0);   // 앱: 홈으로 · 메뉴 이름 바꾸기
+  /** 직접 만들기: 업종 이름 + 질문 2개 → 영업 방식 */
+  function customSheet() {
+    const m = modal(`<h2>직접 만들기</h2>
+      <p class="sp-muted">업종 이름을 적고 두 가지만 골라 주세요. 그 영업 방식에 맞는 메뉴로 짜 드려요.</p>
+      <form>
+        <label class="sp-field"><span>업종 이름</span><input name="label" maxlength="20" required placeholder="예: 정수기 렌탈 · 사무용품 납품 · 광고 대행"></label>
+        <fieldset class="sp-q"><legend>주로 누구에게 파세요?</legend>
+          <label class="sp-chk"><input type="radio" name="who" value="person" required> <span><b>개인</b><small>일반 손님 · 가족 · 개인 고객</small></span></label>
+          <label class="sp-chk"><input type="radio" name="who" value="company"> <span><b>사업자 · 회사</b><small>가게 · 병원 · 회사 담당자</small></span></label>
+        </fieldset>
+        <fieldset class="sp-q" data-how hidden><legend>거래는 어떻게 이어지나요?</legend>
+          <label class="sp-chk"><input type="radio" name="how" value="once"> <span><b>한 번 크게</b><small>제안 · 견적 · 협상 끝에 수주</small></span></label>
+          <label class="sp-chk"><input type="radio" name="how" value="repeat"> <span><b>계속 거래</b><small>정해진 거래처를 돌며 주문 · 납품</small></span></label>
+        </fieldset>
+        <p class="sp-tipline" data-result hidden></p>
+        <div class="sp-err" aria-live="polite"></div>
+        <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button class="sp-btn sp-dark">이대로 시작</button></div>
+      </form>`);
+    const f = m.querySelector('form'), how = m.querySelector('[data-how]'), res = m.querySelector('[data-result]');
+    const sync = () => {
+      const who = f.who.value; how.hidden = who !== 'company';
+      if (!who || (who === 'company' && !f.how.value)) { res.hidden = true; return; }
+      const p = T.pickType(who, f.how.value), ty = T.TYPES[p.type];
+      res.hidden = false; res.innerHTML = `<b>${esc(ty.name)}</b>으로 짜 드려요 — ${esc(ty.desc)}`;
+    };
+    f.addEventListener('change', sync);
+    f.onsubmit = e => {
+      e.preventDefault();
+      const label = f.label.value.trim(), who = f.who.value, hw = f.how.value;
+      if (!label) return void (m.querySelector('.sp-err').textContent = '업종 이름을 적어 주세요.');
+      if (!who || (who === 'company' && !hw)) return void (m.querySelector('.sp-err').textContent = '질문에 답해 주세요.');
+      const p = T.pickType(who, hw);
+      act(async () => { await DB.setTemplate(p.base, label); await seedDemo(p.base); tab = 0; pickOpen = null; picking = false; closeModal(); toast(`'${label}' 업종으로 시작해요`); picked(); });
+    };
   }
 
   // ---------- 창 ----------
@@ -106,10 +170,12 @@ const Sales = (() => {
     if (el.dataset.sp === 'visit') planVisit(el.dataset.id);
     if (el.dataset.sp === 'call') markCall(el.dataset.id);          // 기본 동작(전화 앱 열기)은 그대로
     if (el.dataset.sp === 'note') noteSheet(el.dataset.id, null);
+    if (el.dataset.sp === 'order') orderSheet(el.dataset.id);
   }
 
   const RES = { good: '좋음', hold: '고민 중', later: '다시 연락', no: '거절' };
   const actText = a => a.kind === 'stage' ? `${a.body.from || '처음'} → ${a.body.to}` : a.kind === 'memo' ? a.body.text
+    : a.kind === 'visit' && a.body.order ? `주문 ${a.body.order.items || ''}${a.body.order.amount ? ' · ' + Number(a.body.order.amount).toLocaleString('ko-KR') + '만 원' : ''}`
     : a.kind === 'call' ? `통화 ${a.body.minutes || ''}분${a.body.result ? ' · ' + (RES[a.body.result] || '') : ''}${a.body.text ? ' — ' + a.body.text : ''}` : a.kind;
 
   function openCard(id) {
@@ -130,6 +196,7 @@ const Sales = (() => {
       <div class="sp-quick">
         ${c.phone ? `<a class="sp-btn sp-call" data-sp="call" data-id="${c.id}" href="tel:${esc(c.phone.replace(/[^0-9+]/g, ''))}">전화 걸기</a>` : ''}
         <button type="button" class="sp-btn" data-sp="note" data-id="${c.id}">말로 남기기</button>
+        ${T.type(t).id === 'route' ? `<button type="button" class="sp-btn sp-gold" data-sp="order" data-id="${c.id}">주문 받기</button>` : ''}
         ${hasPlanner() ? `<button type="button" class="sp-btn sp-dark" data-sp="visit" data-id="${c.id}">${esc(T.word(t, 'visit'))} 일정 잡기</button>` : ''}
       </div>
       ${c.nextContact ? `<p class="sp-next">다음 연락 <b>${esc(md(c.nextContact.date))}</b> · ${esc(c.nextContact.task || '다시 연락')}</p>` : ''}
@@ -425,7 +492,12 @@ const Sales = (() => {
   function onClick(e) {
     const el = e.target.closest('[data-sp]'); if (!el || !box.contains(el)) return;
     const k = el.dataset.sp;
-    if (k === 'ind') act(async () => { await DB.setTemplate(el.dataset.id); await seedDemo(el.dataset.id); tab = 0; });
+    if (k === 'ind') act(async () => { await DB.setTemplate(el.dataset.id, null); await seedDemo(el.dataset.id); tab = 0; picking = false; pickOpen = null; picked(); });
+    else if (k === 'more') { pickOpen = el.dataset.type; renderPick(); }
+    else if (k === 'custom') customSheet();
+    else if (k === 'change') { picking = true; render(); }
+    else if (k === 'cancelpick') { picking = false; render(); }
+    else if (k === 'order') orderSheet(el.dataset.id);
     else if (k === 'tab') { tab = Number(el.dataset.i); render(); }
     else if (k === 'open') openCard(el.dataset.id);
     else if (k === 'add') addCustomer();
@@ -458,8 +530,66 @@ const Sales = (() => {
     return { text: L.join('\n'), counts: { visits: visits.length, calls: calls.length, moves: moves.length, memos: memos.length } };
   }
 
+  /** 주문 받기 (거래처 순회형): 품목 · 금액 · 다음 납품일 → 방문 기록 + 다음 납품 알림 */
+  function orderSheet(id) {
+    const c = S().customers.find(x => x.id === id); if (!c) return;
+    const f0 = c.fields || {};
+    const m = modal(`<h2>${esc(c.name)} 주문</h2>
+      <form>
+        <label class="sp-field"><span>품목 · 수량</span><input name="items" maxlength="120" required placeholder="예: 양파 2박스 · 삼겹살 10kg" value="${esc(f0.items || '')}"></label>
+        <label class="sp-field"><span>금액 (만 원)</span><input name="amount" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label class="sp-field"><span>납품일</span><input name="delivery" type="date" value="${esc(U.addDays(today(), 1))}"></label>
+        <label class="sp-chk"><input type="checkbox" name="credit"> <span>외상 (미수금에 더하기)</span></label>
+        <div class="sp-err" aria-live="polite"></div>
+        <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button class="sp-btn sp-dark">주문 저장</button></div>
+      </form>`);
+    m.querySelector('form').onsubmit = e => {
+      e.preventDefault();
+      const fm = e.target, amount = fm.amount.value === '' ? null : Number(fm.amount.value), d = fm.delivery.value;
+      if (d && !T._date.isYmd(d)) return void (m.querySelector('.sp-err').textContent = '납품일을 확인해 주세요.');
+      act(async () => {
+        const fields = Object.assign({}, c.fields, { items: fm.items.value.trim() });
+        if (d) fields.nextDelivery = d;
+        if (fm.credit.checked && amount) fields.unpaid = Math.round(((Number(fields.unpaid) || 0) + amount) * 10) / 10;
+        c.fields = fields; c.lastActivityAt = today();
+        await DB.updateCustomer(c);
+        await DB.addActivity(c, 'visit', { order: { items: fm.items.value.trim(), amount, delivery: d || null, credit: !!fm.credit.checked } }, 'user', today());
+        closeModal(); toast(`주문을 저장했어요${d ? ' · 납품 전날 알림' : ''}`);
+      });
+    };
+  }
+
+  /** 홈 화면 · 마감 보고용 숫자 (영업 방식별) */
+  function stats() {
+    if (!DB.loaded || !S().templateId) return null;
+    const t = tpl(), ty = T.type(t), list = mine(), td = today(), win = T.winStage(t);
+    const out = { type: ty.id, noun: ty.noun, name: t.name };
+    if (ty.id === 'route') {
+      const dueVisit = list.flatMap(c => T.followups(t, c, td).filter(f => f.ruleId === 'cycle' && f.date <= U.addDays(td, 6)).map(f => ({ id: c.id, name: c.name, date: f.date, overdue: f.overdue })));
+      out.visits = dueVisit.sort((a, b) => (a.date < b.date ? -1 : 1));
+      out.deliveries = list.filter(c => c.fields && T._date.isYmd(c.fields.nextDelivery) && c.fields.nextDelivery >= td && c.fields.nextDelivery <= U.addDays(td, 2))
+        .map(c => ({ id: c.id, name: c.name, date: c.fields.nextDelivery, items: c.fields.items || '' })).sort((a, b) => (a.date < b.date ? -1 : 1));
+      out.unpaid = list.reduce((n, c) => n + (Number(c.fields && c.fields.unpaid) || 0), 0);
+      out.unpaidN = list.filter(c => Number(c.fields && c.fields.unpaid) > 0).length;
+    } else if (ty.id === 'b2b') {
+      const open = list.filter(c => c.stage !== win);
+      const pct = c => parseInt((c.fields || {}).chance, 10) || 0, amt = c => Number((c.fields || {}).amount) || 0;
+      out.pipeline = open.reduce((n, c) => n + amt(c), 0);
+      out.weighted = Math.round(open.reduce((n, c) => n + amt(c) * pct(c) / 100, 0));
+      out.closing = open.filter(c => T._date.isYmd((c.fields || {}).closeBy) && c.fields.closeBy <= U.addDays(td, 14))
+        .map(c => ({ id: c.id, name: c.name, date: c.fields.closeBy, amount: amt(c), chance: pct(c) })).sort((a, b) => (a.date < b.date ? -1 : 1));
+    } else {
+      const dateFields = t.fields.filter(f => f.type === 'date').map(f => f.key);
+      out.renewals = list.flatMap(c => dateFields.filter(k => T._date.isYmd((c.fields || {})[k]) && c.fields[k] >= td && c.fields[k] <= U.addDays(td, 45))
+        .map(k => ({ id: c.id, name: c.name, date: c.fields[k], label: t.fields.find(f => f.key === k).label }))).sort((a, b) => (a.date < b.date ? -1 : 1));
+      out.referrals = list.filter(c => c.fields && c.fields.referrer).length;
+      out.wins = list.filter(c => c.stage === win).length;
+    }
+    return out;
+  }
+
   return {
-    dayReport,
+    dayReport, stats, typeOf, startPick: () => { picking = true; pickOpen = null; }, noun: () => typeOf().noun,
     due, openCustomer: id => openCard(id), _checkReturn: () => checkReturn(),
     customer: id => S().customers.find(x => x.id === id) || null,
     templateName: () => (S().templateId ? tpl().name : ''),
@@ -470,7 +600,7 @@ const Sales = (() => {
       if (!DB.loaded) {
         render();
         DB.load().then(async () => {
-          if (opts.template && !S().templateId && T.list().some(x => x.id === opts.template)) await DB.setTemplate(opts.template);
+          if (opts.template && !S().templateId && T.has(opts.template)) await DB.setTemplate(opts.template, null);
           if (S().templateId) await seedDemo(S().templateId);
           render();
         });
