@@ -69,3 +69,22 @@
 .sp-chk { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line-2); font-size: 14px; min-height: 44px; }
 .sp-chk input { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; }
 .sp-chk small { color: var(--slate); }
+/* 명함 읽기 */
+.sp-wide { width: 100%; margin: 4px 0 2px; }
+.sp-unsure input { border-color: #d9a441; background: #fff9ec; }
+.sp-unsure em { color: #b07a12; font-style: normal; font-size: 11px; margin-left: 4px; }
+.sp-cards { display: grid; gap: 8px; margin: 8px 0 12px; max-height: 50vh; overflow: auto; }
+.sp-cards small { color: #777; }
+/* 오늘 동선 */
+.sp-stops { list-style: none; margin: 8px 0; padding: 0; }
+.sp-stop { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.sp-stop b { min-width: 44px; font-variant-numeric: tabular-nums; }
+.sp-stop span { display: flex; flex-direction: column; }
+.sp-stop small { color: #888; font-size: 12px; }
+.sp-stop.next b { color: #b8892e; }
+.sp-leg { margin-left: 21px; padding: 2px 0 2px 22px; border-left: 2px dashed #d8d2c4; color: #888; font-size: 12px; }
+.sp-leg.tight { color: #c0392b; border-left-color: #e8a59c; }
+.sp-link { background: none; border: 0; color: inherit; text-decoration: underline; font-size: 12px; padding: 0 2px; cursor: pointer; }
+.sp-tipline { background: #faf6ec; border-radius: 10px; padding: 8px 10px; font-size: 13px; margin: 6px 0; }
+.sp-route .sp-actions { flex-wrap: wrap; }
+.sp-route a.sp-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }

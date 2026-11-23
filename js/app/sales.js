@@ -125,6 +125,7 @@ const Sales = (() => {
     }).join('');
     const m = modal(`
       <div class="sp-mhead"><span class="sp-av big">${esc(c.name[0])}</span><div><h2>${esc(c.name)}</h2>
+        ${c.org || c.title ? `<p class="sp-muted">${esc([c.org, c.title].filter(Boolean).join(' · '))}</p>` : ''}
         <div class="sp-steps">${t.stages.map(s => `<span class="${t.stages.indexOf(s) <= t.stages.indexOf(c.stage) ? 'on' : ''}">${esc(s)}</span>`).join('')}</div></div></div>
       <div class="sp-quick">
         ${c.phone ? `<a class="sp-btn sp-call" data-sp="call" data-id="${c.id}" href="tel:${esc(c.phone.replace(/[^0-9+]/g, ''))}">전화 걸기</a>` : ''}
@@ -134,6 +135,7 @@ const Sales = (() => {
       ${c.nextContact ? `<p class="sp-next">다음 연락 <b>${esc(md(c.nextContact.date))}</b> · ${esc(c.nextContact.task || '다시 연락')}</p>` : ''}
       ${visitsOf(c).length ? `<div class="sp-visits">${visitsOf(c).map(v => `<div><b>${esc(md(v.date))} ${esc(v.start)}</b><span>${esc(v.location || '장소 미정')}</span></div>`).join('')}</div>` : ''}
       <form>${inputs}
+        <label class="sp-field"><span>주소</span><input name="_address" maxlength="120" placeholder="동선 짤 때 써요" value="${esc(c.address || '')}"></label>
         <label class="sp-field"><span>생일</span><input name="_birthday" placeholder="MM-DD" value="${esc(c.birthday ? String(c.birthday).slice(-5) : '')}"></label>
         <label class="sp-field"><span>메모 남기기</span><input name="_memo" placeholder="예: 설계안 두 가지 비교 원함"></label>
         <div class="sp-err" aria-live="polite"></div>
@@ -157,7 +159,7 @@ const Sales = (() => {
       if (bad.length) { m.querySelector('.sp-err').textContent = '다시 확인해 주세요: ' + bad.join(', '); return; }
       const memo = String(fd.get('_memo') || '').trim();
       act(async () => {
-        c.fields = fields; c.birthday = b || null;
+        c.fields = fields; c.birthday = b || null; c.address = String(fd.get('_address') || '').trim().slice(0, 120);
         if (memo) await DB.addActivity(c, 'memo', { text: memo }, 'user', today());
         await DB.updateCustomer(c);
         closeModal();
@@ -280,7 +282,7 @@ const Sales = (() => {
       <form>
         <label class="sp-field"><span>날짜</span><input name="date" type="date" required value="${U.addDays(today(), 1)}"></label>
         <label class="sp-field"><span>시간</span><input name="start" type="time" required value="10:00"></label>
-        <label class="sp-field"><span>장소</span><input name="location" placeholder="예: 성수동 ○○빌딩 3층" maxlength="80"></label>
+        <label class="sp-field"><span>장소</span><input name="location" placeholder="예: 성수동 ○○빌딩 3층" maxlength="80" value="${esc((c.address || '').slice(0, 80))}"></label>
         <label class="sp-field"><span>이동</span><select name="mode"><option value="car">자가용</option><option value="taxi">택시</option><option value="walk">도보</option><option value="none">이동 없음</option></select></label>
         <label class="sp-field"><span>이동 시간(분)</span><input name="travel" type="number" min="0" max="600" value="30"></label>
         <div class="sp-err" aria-live="polite"></div>
@@ -301,22 +303,69 @@ const Sales = (() => {
     };
   }
 
-  function addCustomer() {
+  const CARD_KEYS = [['name', '이름', 40], ['phone', '연락처', 20], ['org', '회사', 60], ['title', '직함', 60], ['address', '주소', 120], ['email', '이메일', 80]];
+  function custForm(v, unsure) {
+    v = v || {}; unsure = unsure || [];
+    return CARD_KEYS.map(([k, label, n]) => `<label class="sp-field ${unsure.includes(k) ? 'sp-unsure' : ''}"><span>${label}${unsure.includes(k) ? ' <em>확인해 주세요</em>' : ''}</span>
+      <input name="${k}" maxlength="${n}" value="${esc(v[k] || '')}" ${k === 'name' ? 'required' : ''} ${k === 'phone' ? 'inputmode="tel"' : k === 'email' ? 'type="email"' : ''}
+        ${k === 'address' ? 'placeholder="동선 짤 때 써요 (예: 성수이로 113)"' : ''}></label>`).join('');
+  }
+  async function saveNew(v, source) {
+    const t = tpl();
+    const c = await DB.addCustomer({ templateId: S().templateId, name: v.name, phone: v.phone || '', stage: t.stages[0],
+      stageAt: today(), lastActivityAt: today(), fields: {}, birthday: null, owner: 'personal', source,
+      org: v.org || '', title: v.title || '', email: v.email || '', address: v.address || '',
+      nextContact: source === 'card' ? { date: U.addDays(today(), 1), task: '명함 받은 분께 인사 문자' } : null });
+    await DB.addActivity(c, 'stage', { from: null, to: t.stages[0], source }, source === 'card' ? 'auto' : 'user', today());
+    return c;
+  }
+  const digits = v => String(v || '').replace(/\D/g, '');
+  /** 같은 번호로 이미 등록된 고객 */
+  function dupOf(v) { const d = digits(v.phone); return d.length >= 9 ? S().customers.find(c => digits(c.phone) === d) : null; }
+  function readOf(form) { const o = {}; CARD_KEYS.forEach(([k]) => { o[k] = String(form[k].value || '').trim(); }); return o; }
+
+  function addCustomer(prefill, unsure) {
     const t = tpl();
     const m = modal(`<h2>${esc(customerWord(t))} 등록</h2>
-      <p class="sp-muted">곧 명함 사진 한 장으로 자동 등록돼요</p>
-      <form><label class="sp-field"><span>이름</span><input name="name" required maxlength="40"></label>
-      <label class="sp-field"><span>연락처</span><input name="phone" inputmode="tel" maxlength="20"></label>
+      <button type="button" class="sp-btn sp-gold sp-wide" data-card>📇 명함 사진으로 채우기</button>
+      <p class="sp-muted">${prefill ? '읽은 내용을 확인하고 등록을 눌러 주세요. 사진은 저장하지 않아요.' : '명함을 찍으면 이름 · 번호 · 회사 · 주소가 자동으로 채워져요'}</p>
+      <form>${custForm(prefill, unsure)}
+      <div class="sp-err" aria-live="polite"></div>
       <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button class="sp-btn sp-dark">등록</button></div></form>`);
+    const err = m.querySelector('.sp-err'), cardBtn = m.querySelector('[data-card]');
+    cardBtn.onclick = async () => {
+      err.textContent = '';
+      try {
+        const cards = await CardRead.run(b => { cardBtn.disabled = b; cardBtn.textContent = b ? '명함 읽는 중…' : '📇 명함 사진으로 채우기'; });
+        if (cards == null) return;
+        if (!cards.length) { err.textContent = '명함을 찾지 못했어요. 밝은 곳에서 명함만 크게 찍어 주세요.'; return; }
+        if (cards.length === 1) addCustomer(cards[0], cards[0].unsure);
+        else manyCards(cards);
+      } catch (e2) { err.textContent = e2.message; }
+    };
     m.querySelector('form').onsubmit = e => {
       e.preventDefault();
-      const fd = new FormData(e.target), name = String(fd.get('name')).trim(); if (!name) return;
+      const v = readOf(e.target); if (!v.name) return;
+      const dup = dupOf(v);
+      if (dup && !e.target.dataset.dupOk) { e.target.dataset.dupOk = '1'; err.textContent = `같은 번호로 ${dup.name} 님이 이미 있어요. 그래도 등록하려면 한 번 더 눌러 주세요.`; return; }
       act(async () => {
-        const c = await DB.addCustomer({ templateId: S().templateId, name, phone: String(fd.get('phone') || '').trim(), stage: t.stages[0],
-          stageAt: today(), lastActivityAt: today(), fields: {}, birthday: null, owner: 'personal', source: 'manual' });
-        await DB.addActivity(c, 'stage', { from: null, to: t.stages[0] }, 'user', today());
-        tab = 0; closeModal();
+        const c = await saveNew(v, prefill ? 'card' : 'manual');
+        tab = 0; closeModal(); toast(`${c.name} 님을 등록했어요${prefill ? ' · 내일 인사 문자 알림을 넣었어요' : ''}`);
       });
+    };
+  }
+
+  /** 한 사진에 명함이 여러 장 — 고른 것만 한 번에 등록 */
+  function manyCards(cards) {
+    const m = modal(`<h2>명함 ${cards.length}장을 읽었어요</h2>
+      <p class="sp-muted">등록할 분만 남기고 등록을 눌러 주세요. 자세한 칸은 나중에 고칠 수 있어요.</p>
+      <div class="sp-cards">${cards.map((c, i) => `<label class="sp-chk"><input type="checkbox" data-i="${i}" ${c.name && !dupOf(c) ? 'checked' : ''}>
+        <span><b>${esc(c.name || '이름 없음')}</b> ${esc([c.org, c.title].filter(Boolean).join(' · '))}<br><small>${esc(c.phone || '번호 없음')}${dupOf(c) ? ' · 이미 등록됨' : ''}${c.unsure.length ? ' · 흐린 칸 있음' : ''}</small></span></label>`).join('')}</div>
+      <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button type="button" class="sp-btn sp-dark" data-save>등록</button></div>`);
+    m.querySelector('[data-save]').onclick = () => {
+      const pick = [...m.querySelectorAll('input[data-i]:checked')].map(x => cards[Number(x.dataset.i)]).filter(c => c.name);
+      if (!pick.length) return;
+      act(async () => { for (const c of pick) await saveNew(c, 'card'); tab = 0; closeModal(); toast(`${pick.length}명을 등록했어요 · 내일 인사 문자 알림을 넣었어요`); });
     };
   }
 

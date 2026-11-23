@@ -92,6 +92,7 @@ const App = {
       this.updateChatDot(); return;
     }
     this.bind(root);
+    if (this.tab === 'home') this.fillRoute();
     this.updateChatDot();
   },
 
@@ -144,10 +145,44 @@ const App = {
     return `<div class="sp-home">
       ${showRep ? `<section class="sp-card"><h2>오늘 마감 보고서 <span class="sp-muted">자동 작성</span></h2><p class="sp-brief">방문 <b>${rep.counts.visits}</b> · 통화 <b>${rep.counts.calls}</b> · 단계 이동 <b>${rep.counts.moves}</b> · 메모 <b>${rep.counts.memos}</b></p><button class="sp-btn sp-dark" data-report style="width:100%;margin-top:8px">보고서 보기 · 보내기</button></section>` : ''}
       <section class="sp-card"><h2>오늘 브리핑 <span class="sp-muted">${U.esc(Sales.templateName())}</span></h2><p class="sp-brief">${line}${tip}</p></section>
+      ${this.routeStops().length >= 2 ? '<section class="sp-card sp-route" id="spRoute"><h2>오늘 동선</h2><p class="sp-muted">동선 계산 중…</p></section>' : ''}
       ${due.length ? `<section class="sp-card"><h2>다시 연락할 고객 <span class="sp-muted">3일 안</span></h2>
         ${due.slice(0, 4).map(f => `<button class="sp-due ${f.overdue ? 'late' : ''}" data-opencust="${U.esc(f.customerId)}"><b>${U.esc(f.date.slice(5).replace('-', '.'))}</b><span>${U.esc(f.name)} — ${U.esc(f.task)}</span>${f.overdue ? '<em>지남</em>' : ''}</button>`).join('')}
         ${due.length > 4 ? `<button class="sp-btn" data-gotab="customers" style="width:100%;margin-top:6px">${due.length - 4}건 더 보기</button>` : ''}</section>` : ''}
     </div>`;
+  },
+
+  /** 오늘 장소가 있는 일정 (시간순). 고객 방문이면 고객 주소를 먼저 씀 */
+  routeStops() {
+    if (typeof DayRoute === 'undefined') return [];
+    return Store.byDate(U.today()).filter(s => s.status !== 'cancelled' && this.placeOf(s)).sort((a, b) => a.start.localeCompare(b.start));
+  },
+  placeOf(s) {
+    const c = s.briefing && s.briefing.customerId && typeof Sales !== 'undefined' ? Sales.customer(s.briefing.customerId) : null;
+    return String((c && c.address) || s.location || '').trim();
+  },
+  /** 홈 '오늘 동선' 카드 채우기 (좌표 찾기가 비동기라 그린 뒤에 채움) */
+  async fillRoute() {
+    const box = document.getElementById('spRoute'); if (!box) return;
+    const seq = (this._routeSeq = (this._routeSeq || 0) + 1);
+    let r;
+    try { r = await DayRoute.plan(this.routeStops(), s => this.placeOf(s)); } catch { r = null; }
+    const el = document.getElementById('spRoute'); if (!el || seq !== this._routeSeq) return;
+    if (!r || !r.items.length) { el.remove(); return; }
+    const total = r.items.reduce((n, x) => n + (x.leg ? x.leg.km : 0), 0);
+    const now = new Date(), next = r.items.find(x => U.at(x.s.date, x.s.start) > now) || r.items[r.items.length - 1];
+    const nav = DayRoute.naverApp(r.items);
+    el.innerHTML = `<h2>오늘 동선 <span class="sp-muted">${r.items.length}곳${total ? ' · 약 ' + total.toFixed(1) + 'km' : ''}</span></h2>
+      <ol class="sp-stops">${r.items.map((x, i) => `${x.leg ? `<li class="sp-leg ${x.leg.tight ? 'tight' : ''}">${x.leg.km}km · 약 ${x.leg.min}분${x.leg.tight ? ` — <b>빠듯해요</b> (틈 ${Math.max(0, x.leg.gap)}분) <button class="sp-link" data-adjust="${U.esc(x.s.id)}" data-prev="${U.esc(r.items[i - 1].s.id)}">조정 요청</button>` : ''}</li>` : ''}
+        <li class="sp-stop ${x === next ? 'next' : ''}"><b>${U.esc(x.s.start)}</b><span>${U.esc(x.s.title)}<small>${U.esc(x.place)}${x.geo ? '' : ' · 위치 못 찾음'}</small></span></li>`).join('')}</ol>
+      ${r.better ? `<p class="sp-tipline">약속을 옮길 수 있다면 이 순서가 약 <b>${r.better.saveKm}km</b> 짧아요: ${r.better.order.map(U.esc).join(' → ')}</p>` : ''}
+      ${r.missing.length ? `<p class="sp-muted">위치를 못 찾은 곳은 고객 카드에 주소를 넣으면 다음부터 계산돼요</p>` : ''}
+      <div class="sp-actions">${nav ? `<a class="sp-btn sp-dark" href="${U.esc(nav)}">네이버 지도로 전체 길안내</a>` : ''}<a class="sp-btn" target="_blank" rel="noopener" href="${U.esc(DayRoute.webTo(next))}">다음 장소 길찾기</a></div>`;
+    el.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', async () => {
+      const nb = Store.get(b.dataset.adjust), a = Store.get(b.dataset.prev); if (!nb || !a) return;
+      try { await Store.send(`'${a.title}' 끝나고 '${nb.title}'까지 이동 시간이 부족해요. 조정해 주세요.`, { ref: nb.id }); U.toast('팀장에게 조정을 요청했어요'); }
+      catch (e) { U.toast('보내지 못했어요: ' + (e.message || e)); }
+    }));
   },
 
   /** 기사님 최근 상태 한 줄 (대기 중 · 출발 · 현장 도착) + 출발했으면 도착 예상 · 늦을 것 같으면 경고 */
