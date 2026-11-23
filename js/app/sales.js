@@ -61,7 +61,7 @@ const Sales = (() => {
     box.innerHTML = `
       <header class="sp-head">
         <div><div class="sp-sub">${esc(t.name)} 템플릿${DB.live() ? '' : ' · 데모 (이 기기에만 저장)'}</div><h1>고객 · 진행 단계</h1></div>
-        <button class="sp-btn sp-dark" data-sp="add">+ ${esc(customerWord(t))} 등록</button>
+        <div class="sp-headbtns"><button class="sp-btn" data-sp="import">엑셀로 가져오기</button><button class="sp-btn sp-dark" data-sp="add">+ ${esc(customerWord(t))} 등록</button></div>
       </header>
       <div class="sp-inds" role="radiogroup" aria-label="업종">
         ${T.list().map(x => `<button role="radio" aria-checked="${x.id === S().templateId}" class="sp-chip ${x.id === S().templateId ? 'on' : ''}" data-sp="ind" data-id="${x.id}">${esc(x.name)}</button>`).join('')}
@@ -355,6 +355,59 @@ const Sales = (() => {
     };
   }
 
+  /** 엑셀 · CSV 가져오기: 붙여넣기 또는 파일 → 칸 자동 맞춤 → 미리보기 → 등록 */
+  function importSheet() {
+    const t = tpl();
+    const m = modal(`<h2>엑셀로 ${esc(customerWord(t))} 가져오기</h2>
+      <p class="sp-muted">엑셀에서 고객 목록 칸을 <b>복사</b>해 아래에 <b>붙여넣기</b> 하세요. 첫 줄에 '이름 · 전화 · 회사 · 주소' 같은 제목이 있으면 칸을 자동으로 맞춰요.</p>
+      <textarea class="sp-paste" rows="6" placeholder="이름&#9;전화&#9;회사&#10;김민수&#9;010-1234-5678&#9;한빛물산"></textarea>
+      <div class="sp-actions"><label class="sp-btn sp-file">CSV 파일 고르기<input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden></label><button type="button" class="sp-btn sp-dark" data-go>미리보기</button></div>
+      <p class="sp-muted small">.xlsx 파일은 엑셀에서 '다른 이름으로 저장 → CSV UTF-8'로 저장하거나, 칸을 복사해 붙여넣어 주세요. 한 번에 ${ImportParse.MAX}명까지.</p>
+      <div class="sp-err" aria-live="polite"></div>`);
+    const ta = m.querySelector('textarea'), err = m.querySelector('.sp-err');
+    const go = text => {
+      const ex = new Set(S().customers.map(c => digits(c.phone)).filter(d => d.length >= 9));
+      const r = ImportParse.parse(text, { stages: t.stages, existingPhones: ex });
+      if (!r.items.length) { err.textContent = '읽을 줄이 없어요. 이름이나 전화번호가 있는 칸을 붙여넣어 주세요.'; return; }
+      if (!('name' in r.map)) { err.textContent = "이름 칸을 찾지 못했어요. 첫 줄에 '이름' 제목을 넣고 다시 해 주세요."; return; }
+      importPreview(r);
+    };
+    m.querySelector('[data-go]').onclick = () => go(ta.value);
+    m.querySelector('input[type=file]').onchange = async e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      if (f.size > 2e6) { err.textContent = '파일이 너무 커요 (2MB까지).'; return; }
+      const buf = await f.arrayBuffer();
+      let text = new TextDecoder('utf-8').decode(buf);
+      if (text.includes('\uFFFD')) { try { text = new TextDecoder('euc-kr').decode(buf); } catch { /* 그대로 */ } }   // 옛 엑셀 CSV (한글 깨짐)
+      go(text);
+    };
+  }
+  function importPreview(r) {
+    const t = tpl(), LAB = { name: '이름', phone: '전화', org: '회사', title: '직함', address: '주소', email: '이메일', memo: '메모', stage: '단계', birthday: '생일' };
+    const ok = r.items.filter(x => !x.problem && !x.dup), dup = r.items.filter(x => x.dup).length, bad = r.items.filter(x => x.problem).length;
+    const m = modal(`<h2>${r.items.length}줄을 읽었어요</h2>
+      <p class="sp-muted">맞춘 칸: ${Object.keys(r.map).map(k => `<b>${LAB[k]}</b>`).join(' · ')}${r.hasHead ? '' : ' (제목이 없어 내용으로 짐작했어요)'}</p>
+      <div class="sp-impsum"><span class="ok">등록 ${ok.length}명</span>${dup ? `<span>같은 번호 ${dup}명 건너뜀</span>` : ''}${bad ? `<span class="bad">확인 필요 ${bad}줄 건너뜀</span>` : ''}${r.cut ? `<span class="bad">${ImportParse.MAX}명 넘는 ${r.total - ImportParse.MAX}줄은 다음에</span>` : ''}</div>
+      <div class="sp-imptable"><table><thead><tr><th>이름</th><th>전화</th><th>회사 · 주소</th><th>단계</th></tr></thead><tbody>
+      ${r.items.slice(0, 30).map(x => `<tr class="${x.problem ? 'bad' : x.dup ? 'dup' : ''}"><td>${esc(x.name || '—')}</td><td>${esc(x.phone || '—')}</td><td>${esc([x.org, x.address].filter(Boolean).join(' · ') || '—')}</td><td>${esc(x.problem || (x.dup ? '이미 있음' : x.stage || t.stages[0]))}</td></tr>`).join('')}
+      </tbody></table>${r.items.length > 30 ? `<p class="sp-muted small">… 외 ${r.items.length - 30}줄</p>` : ''}</div>
+      <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button type="button" class="sp-btn sp-dark" data-save ${ok.length ? '' : 'disabled'}>${ok.length}명 등록</button></div>`);
+    m.querySelector('[data-save]').onclick = e => {
+      e.target.disabled = true;
+      act(async () => {
+        let n = 0;
+        for (const x of ok) {
+          const c = await DB.addCustomer({ templateId: S().templateId, name: x.name, phone: x.phone, stage: x.stage || t.stages[0],
+            stageAt: today(), lastActivityAt: today(), fields: {}, birthday: x.birthday, owner: 'personal', source: 'excel',
+            org: x.org, title: x.title, email: x.email, address: x.address, nextContact: null });
+          if (x.memo) await DB.addActivity(c, 'memo', { text: x.memo }, 'auto', today());
+          n++; e.target.textContent = `등록 중… ${n}/${ok.length}`;
+        }
+        tab = 0; closeModal(); toast(`${n}명을 가져왔어요`);
+      });
+    };
+  }
+
   /** 한 사진에 명함이 여러 장 — 고른 것만 한 번에 등록 */
   function manyCards(cards) {
     const m = modal(`<h2>명함 ${cards.length}장을 읽었어요</h2>
@@ -376,6 +429,7 @@ const Sales = (() => {
     else if (k === 'tab') { tab = Number(el.dataset.i); render(); }
     else if (k === 'open') openCard(el.dataset.id);
     else if (k === 'add') addCustomer();
+    else if (k === 'import') importSheet();
     else if (k === 'reload') { DB.loaded = false; render(); DB.load().then(render); }
   }
 

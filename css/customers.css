@@ -88,3 +88,22 @@
 .sp-tipline { background: #faf6ec; border-radius: 10px; padding: 8px 10px; font-size: 13px; margin: 6px 0; }
 .sp-route .sp-actions { flex-wrap: wrap; }
 .sp-route a.sp-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+/* 엑셀 가져오기 */
+.sp-headbtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.sp-paste { width: 100%; box-sizing: border-box; font: 13px/1.5 ui-monospace, Menlo, monospace; border: 1px solid #ddd; border-radius: 10px; padding: 10px; margin: 8px 0; }
+.sp-file { cursor: pointer; }
+.sp-impsum { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; }
+.sp-impsum span { padding: 3px 9px; border-radius: 99px; background: #f1f0ec; }
+.sp-impsum .ok { background: #e7f3ea; color: #1d6b35; font-weight: 600; }
+.sp-impsum .bad { background: #fdecea; color: #a5301f; }
+.sp-imptable { max-height: 46vh; overflow: auto; border: 1px solid #eee; border-radius: 10px; }
+.sp-imptable table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.sp-imptable th, .sp-imptable td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; vertical-align: top; }
+.sp-imptable th { position: sticky; top: 0; background: #faf9f6; }
+.sp-imptable tr.dup td { color: #999; }
+.sp-imptable tr.bad td { color: #a5301f; }
+.small { font-size: 12px; }
+.sp-head { flex-wrap: wrap; row-gap: 10px; }
+.sp-head .sp-headbtns { flex: 1 1 100%; justify-content: stretch; }
+.sp-head .sp-headbtns .sp-btn { flex: 1; }
+.sp-imptable td:nth-child(2) { white-space: nowrap; }
