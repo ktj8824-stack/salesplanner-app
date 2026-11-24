@@ -156,6 +156,7 @@ const App = {
       ${this.routeStops().length >= 2 ? '<section class="sp-card sp-route" id="spRoute"><h2>오늘 동선</h2><p class="sp-muted">동선 계산 중…</p></section>' : ''}
       ${due.length ? `<section class="sp-card"><h2>다시 연락할 ${U.esc(Sales.noun())} <span class="sp-muted">3일 안</span></h2>
         ${due.slice(0, 4).map(f => `<button class="sp-due ${f.overdue ? 'late' : ''}" data-opencust="${U.esc(f.customerId)}"><b>${U.esc(f.date.slice(5).replace('-', '.'))}</b><span>${U.esc(f.name)} — ${U.esc(f.task)}</span>${f.overdue ? '<em>지남</em>' : ''}</button>`).join('')}
+        <button class="sp-btn sp-gold sp-wide" data-sendmsg="due">${due.length}명에게 메시지 한 번에 보내기</button>
         ${due.length > 4 ? `<button class="sp-btn" data-gotab="customers" style="width:100%;margin-top:6px">${due.length - 4}건 더 보기</button>` : ''}</section>` : ''}
     </div>`;
   },
@@ -799,6 +800,7 @@ const App = {
     on('[data-addprivate]', () => this.addPrivate());
     on('[data-gotab]', b => this.go(b.dataset.gotab));
     on('[data-report]', () => this.openReport());
+    on('[data-sendmsg]', () => { this.go('customers'); setTimeout(() => Sales.openSend('due'), 50); });
     on('[data-changeind]', () => { Sales.startPick(); this.go('customers'); });
     on('[data-opencust]', b => { this._openCust = b.dataset.opencust; this.go('customers'); });
     on('[data-ai]', () => this.openAI());

@@ -76,7 +76,7 @@ const Sales = (() => {
     box.innerHTML = `
       <header class="sp-head">
         <div><div class="sp-sub">${esc(t.name)} 템플릿${DB.live() ? '' : ' · 데모 (이 기기에만 저장)'}</div><h1>${esc(customerWord(t))} · 진행 단계</h1></div>
-        <div class="sp-headbtns"><button class="sp-btn" data-sp="import">엑셀로 가져오기</button><button class="sp-btn sp-dark" data-sp="add">+ ${esc(customerWord(t))} 등록</button></div>
+        <div class="sp-headbtns"><button class="sp-btn sp-gold" data-sp="send">메시지 보내기</button><button class="sp-btn" data-sp="import">엑셀 가져오기</button><button class="sp-btn sp-dark" data-sp="add">+ ${esc(customerWord(t))} 등록</button></div>
       </header>
       <p class="sp-indline">${esc(T.type(t).name)} · <b>${esc(t.name)}</b> <button class="sp-link" data-sp="change">업종 바꾸기</button></p>
       <section class="sp-card">
@@ -171,10 +171,13 @@ const Sales = (() => {
     if (el.dataset.sp === 'call') markCall(el.dataset.id);          // 기본 동작(전화 앱 열기)은 그대로
     if (el.dataset.sp === 'note') noteSheet(el.dataset.id, null);
     if (el.dataset.sp === 'order') orderSheet(el.dataset.id);
+    if (el.dataset.sp === 'msg') { const c = S().customers.find(x => x.id === el.dataset.id); if (c) reviewSend([{ c, reason: reasonOf(c) }], 'care', ''); }
   }
 
+  const adOk = c => !!(c.fields && c.fields.__ad && !c.fields.__optout);
   const RES = { good: '좋음', hold: '고민 중', later: '다시 연락', no: '거절' };
-  const actText = a => a.kind === 'stage' ? `${a.body.from || '처음'} → ${a.body.to}` : a.kind === 'memo' ? a.body.text
+  const actText = a => a.kind === 'memo' && a.body.message ? `메시지 (${a.body.message.channel === 'sms' ? '문자' : '카톡'}${a.body.message.ad ? ' · 광고' : ''}) — ${a.body.message.text.replace(/\s+/g, ' ').slice(0, 40)}…`
+    : a.kind === 'stage' ? `${a.body.from || '처음'} → ${a.body.to}` : a.kind === 'memo' ? a.body.text
     : a.kind === 'visit' && a.body.order ? `주문 ${a.body.order.items || ''}${a.body.order.amount ? ' · ' + Number(a.body.order.amount).toLocaleString('ko-KR') + '만 원' : ''}`
     : a.kind === 'call' ? `통화 ${a.body.minutes || ''}분${a.body.result ? ' · ' + (RES[a.body.result] || '') : ''}${a.body.text ? ' — ' + a.body.text : ''}` : a.kind;
 
@@ -196,6 +199,7 @@ const Sales = (() => {
       <div class="sp-quick">
         ${c.phone ? `<a class="sp-btn sp-call" data-sp="call" data-id="${c.id}" href="tel:${esc(c.phone.replace(/[^0-9+]/g, ''))}">전화 걸기</a>` : ''}
         <button type="button" class="sp-btn" data-sp="note" data-id="${c.id}">말로 남기기</button>
+        ${c.phone ? `<button type="button" class="sp-btn" data-sp="msg" data-id="${c.id}">메시지</button>` : ''}
         ${T.type(t).id === 'route' ? `<button type="button" class="sp-btn sp-gold" data-sp="order" data-id="${c.id}">주문 받기</button>` : ''}
         ${hasPlanner() ? `<button type="button" class="sp-btn sp-dark" data-sp="visit" data-id="${c.id}">${esc(T.word(t, 'visit'))} 일정 잡기</button>` : ''}
       </div>
@@ -204,6 +208,10 @@ const Sales = (() => {
       <form>${inputs}
         <label class="sp-field"><span>주소</span><input name="_address" maxlength="120" placeholder="동선 짤 때 써요" value="${esc(c.address || '')}"></label>
         <label class="sp-field"><span>생일</span><input name="_birthday" placeholder="MM-DD" value="${esc(c.birthday ? String(c.birthday).slice(-5) : '')}"></label>
+        <label class="sp-field"><span>광고 문자 수신</span><select name="_ad">
+          <option value="">동의 안 받음</option>
+          <option value="yes" ${adOk(c) ? 'selected' : ''}>동의함${adOk(c) ? ' (' + esc(c.fields.__ad) + ')' : ' (오늘 날짜로 기록)'}</option>
+          <option value="no" ${c.fields && c.fields.__optout ? 'selected' : ''}>수신 거부함</option></select></label>
         <label class="sp-field"><span>메모 남기기</span><input name="_memo" placeholder="예: 설계안 두 가지 비교 원함"></label>
         <div class="sp-err" aria-live="polite"></div>
         <div class="sp-actions">
@@ -226,6 +234,10 @@ const Sales = (() => {
       if (bad.length) { m.querySelector('.sp-err').textContent = '다시 확인해 주세요: ' + bad.join(', '); return; }
       const memo = String(fd.get('_memo') || '').trim();
       act(async () => {
+        const ad = String(fd.get('_ad') || '');
+        if (ad === 'yes') { if (!fields.__ad) fields.__ad = today(); delete fields.__optout; }
+        else if (ad === 'no') { delete fields.__ad; fields.__optout = today(); }
+        else { delete fields.__ad; delete fields.__optout; }
         c.fields = fields; c.birthday = b || null; c.address = String(fd.get('_address') || '').trim().slice(0, 120);
         if (memo) await DB.addActivity(c, 'memo', { text: memo }, 'user', today());
         await DB.updateCustomer(c);
@@ -422,6 +434,128 @@ const Sales = (() => {
     };
   }
 
+  // ---------- 고객에게 보내기 (1단계: AI 1:1 초안 → 내 폰 문자 · 카톡으로) ----------
+  /** 지금 이 고객에게 연락하는 이유 (가장 가까운 다시 연락 규칙) */
+  function reasonOf(c, upto, kinds) {
+    const t = tpl(), td = today();
+    const kindOf = f => f.ruleId === 'next' ? 'next' : ((t.rules.find(x => x.id === f.ruleId) || {}).on || 'other');
+    const f = T.followups(t, c, td).filter(x => (!upto || x.date <= upto) && (!kinds || kinds.includes(kindOf(x))))[0];
+    if (!f) return null;
+    if (f.ruleId === 'next') return { kind: 'next', task: f.task, date: f.date };
+    const r = t.rules.find(x => x.id === f.ruleId) || {};
+    const fl = r.field && t.fields.find(x => x.key === r.field);
+    return { kind: r.on || 'other', task: f.task, date: r.on === 'field' ? c.fields[r.field] : f.date, label: fl ? fl.label : '' };
+  }
+  function lastNote(c) {
+    const a = S().activities.find(x => x.customerId === c.id && ((x.kind === 'memo' && !x.body.message && x.body.text) || (x.kind === 'call' && x.body.text)));
+    return a ? a.body.text : '';
+  }
+  /** 보낼 대상 묶음 */
+  function sendGroups() {
+    const t = tpl(), td = today(), list = mine();
+    const withReason = (arr, upto, kinds) => arr.map(c => ({ c, reason: reasonOf(c, upto, kinds) })).filter(x => x.reason);
+    const g = [
+      { id: 'due', label: '다시 연락할 때', hint: '3일 안', items: withReason(list, U.addDays(td, 3)) },
+      { id: 'bday', label: '생일', hint: '7일 안', items: withReason(list, U.addDays(td, 7), ['birthday']) },
+      { id: 'date', label: '만기 · 날짜 다가옴', hint: '45일 안', items: withReason(list, U.addDays(td, 45), ['field']) },
+      { id: 'idle', label: '오래 연락 없음', hint: '45일 넘음', items: list.filter(c => c.lastActivityAt && c.lastActivityAt <= U.addDays(td, -45)).map(c => ({ c, reason: { kind: 'idle' } })) },
+    ];
+    t.stages.forEach(st => g.push({ id: 'st:' + st, label: st + ' 단계', hint: '', items: list.filter(c => c.stage === st).map(c => ({ c, reason: reasonOf(c) })) }));
+    g.push({ id: 'all', label: '전체', hint: '', items: list.map(c => ({ c, reason: reasonOf(c) })) });
+    return g;
+  }
+  function sendSheet(pre) {
+    const groups = sendGroups(), noun = customerWord(tpl());
+    let gi = Math.max(0, groups.findIndex(x => x.id === (pre || 'due')));
+    if (!pre && !groups[gi].items.length) gi = Math.max(0, groups.findIndex(x => x.items.length));
+    const m = modal(`<h2>${esc(noun)}에게 메시지 보내기</h2>
+      <p class="sp-muted">누구에게 보낼지 고르면 AI가 사람마다 기록에 맞춰 다른 글을 써요. 한 명씩 확인하고 내 폰 문자 · 카톡으로 보내요.</p>
+      <div class="sp-chips" data-groups>${groups.map((x, i) => `<button type="button" class="sp-chip ${i === gi ? 'on' : ''}" data-g="${i}" ${x.items.length ? '' : 'disabled'}>${esc(x.label)} <b>${x.items.length}</b></button>`).join('')}</div>
+      <fieldset class="sp-q"><legend>어떤 메시지인가요?</legend>
+        <label class="sp-chk"><input type="radio" name="purpose" value="care" checked> <span><b>안부 · 일정 · 만기 안내</b><small>관계를 이어 가는 연락 — 누구에게나</small></span></label>
+        <label class="sp-chk"><input type="radio" name="purpose" value="ad"> <span><b>상품 · 혜택 권유 (광고)</b><small>수신 동의한 ${esc(noun)}에게만 · (광고) 표시 자동 · 밤 9시~아침 8시 금지</small></span></label>
+      </fieldset>
+      <label class="sp-field"><span>덧붙일 말 <span class="sp-muted">(선택)</span></span><input name="req" maxlength="120" placeholder="예: 12월 말까지 방문 상담하시면 자료 드려요"></label>
+      <p class="sp-tipline" data-count></p>
+      <div class="sp-actions"><button type="button" class="sp-btn" data-sp="close">닫기</button><button type="button" class="sp-btn sp-dark" data-go>글 만들기</button></div>`);
+    const cnt = m.querySelector('[data-count]');
+    const pick = () => {
+      const ad = m.querySelector('[name=purpose]:checked').value === 'ad';
+      const all = groups[gi].items, noPhone = all.filter(x => !x.c.phone).length, noOk = ad ? all.filter(x => x.c.phone && !adOk(x.c)).length : 0;
+      const ok = all.filter(x => x.c.phone && (!ad || adOk(x.c)));
+      cnt.innerHTML = `<b>${ok.length}명</b>에게 보내요${noPhone ? ` · 번호 없음 ${noPhone}명 제외` : ''}${noOk ? ` · 광고 동의 없음 ${noOk}명 제외` : ''}${ad && !MsgDraft.adTimeOk() ? '<br><b>지금은 광고를 보낼 수 없는 시간이에요</b> (밤 9시~아침 8시). 글은 만들어 두고 아침에 보내세요.' : ''}`;
+      return ok;
+    };
+    m.querySelectorAll('[data-g]').forEach(b => b.addEventListener('click', () => { gi = Number(b.dataset.g); m.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('on', x === b)); pick(); }));
+    m.querySelectorAll('[name=purpose]').forEach(r => r.addEventListener('change', pick));
+    pick();
+    m.querySelector('[data-go]').onclick = () => {
+      const ok = pick(); if (!ok.length) return toast('보낼 사람이 없어요');
+      reviewSend(ok.slice(0, 50), m.querySelector('[name=purpose]:checked').value, m.querySelector('[name=req]').value.trim());
+    };
+  }
+  /** 서버 AI 초안 (켜져 있을 때만). 실패하면 null → 폰 안 기본 글 */
+  async function aiDrafts(items, purpose, request) {
+    if (!(DB.live() && Store.client)) return null;
+    try {
+      const t = tpl(), p = Store.profile() || {};
+      const { data, error } = await Store.client.functions.invoke('sp-message-draft', { body: {
+        industry: t.name, honor: T.word(t, 'honor'), visit: T.word(t, 'visit'), purpose, request, rep: { name: p.name || '' },
+        customers: items.map(x => ({ id: x.c.id, name: x.c.name, stage: x.c.stage, reason: x.reason, note: lastNote(x.c).slice(0, 120),
+          fields: Object.fromEntries(Object.entries(x.c.fields || {}).filter(([k, v]) => !k.startsWith('__') && v !== '' && v != null).slice(0, 8)) })),
+      } });
+      if (error || !data || !Array.isArray(data.drafts)) return null;
+      return Object.fromEntries(data.drafts.map(d => [d.id, d.text]));
+    } catch { return null; }
+  }
+  async function reviewSend(items, purpose, request) {
+    const t = tpl(), p = Store.profile() || {}, rep = { name: p.name || '', phone: p.ceoPhone || '' };
+    const ad = purpose === 'ad', ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const local = x => MsgDraft.draft({ today: today(), name: x.c.name, honor: T.word(t, 'honor'), visit: T.word(t, 'visit'), reason: x.reason, lastNote: lastNote(x.c), purpose, request, rep });
+    let m = modal('<h2>글 만드는 중…</h2><p class="sp-muted">기록을 읽고 사람마다 다른 글을 쓰고 있어요</p>');
+    const ai = await aiDrafts(items, purpose, request);
+    const texts = items.map(x => { const a = ai && ai[x.c.id]; return a ? (ad ? MsgDraft.adWrap(a, rep) : a) : local(x); });
+    let i = 0, sent = 0;
+    const show = () => {
+      if (i >= items.length) { closeModal(); render(); return toast(sent ? `${sent}명에게 보냈어요 · 고객 카드에 기록했어요` : '보낸 메시지가 없어요'); }
+      const x = items[i], why = x.reason ? (x.reason.kind === 'birthday' ? '생일' : x.reason.task || '') : '';
+      m = modal(`<div class="sp-sendhead"><b>${i + 1} / ${items.length}</b><span>${ai ? 'AI 초안' : '기본 초안'}${ad ? ' · 광고' : ''}</span></div>
+        <h2>${esc(x.c.name)} <small class="sp-muted">${esc(x.c.stage)}${why ? ' · ' + esc(why) : ''}</small></h2>
+        <textarea class="sp-msgbox" rows="9">${esc(texts[i])}</textarea>
+        <p class="sp-muted small">고쳐서 보내도 돼요. 금액 · 조건 같은 숫자는 직접 확인해 넣어 주세요.</p>
+        <div class="sp-actions sp-sendbtns">
+          <a class="sp-btn sp-dark" data-ch="sms" href="#">문자로 보내기</a>
+          <button type="button" class="sp-btn sp-gold" data-ch="kakao">카톡 · 복사</button>
+          <button type="button" class="sp-btn" data-skip>건너뛰기</button>
+        </div>
+        <button type="button" class="sp-link" data-sp="close">그만하기</button>`);
+      const box = m.querySelector('textarea'), smsA = m.querySelector('[data-ch=sms]');
+      const sync = () => { texts[i] = box.value; smsA.href = MsgDraft.smsHref(x.c.phone, ad ? MsgDraft.adWrap(box.value, rep) : box.value, ios); };
+      box.addEventListener('input', sync); sync();
+      const done = async ch => {
+        let text = box.value.trim(); if (ad) text = MsgDraft.adWrap(text, rep);
+        if (ad && !MsgDraft.adTimeOk()) { toast('밤 9시~아침 8시에는 광고를 보낼 수 없어요'); return false; }
+        if (ch === 'kakao') {
+          try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); toast('복사했어요. 카카오톡 대화방에 붙여넣어 주세요'); } }
+          catch (e) { if (e && e.name === 'AbortError') return false; try { await navigator.clipboard.writeText(text); toast('복사했어요. 카카오톡에 붙여넣어 주세요'); } catch { toast('복사하지 못했어요. 글을 길게 눌러 복사해 주세요'); return false; } }
+        }
+        const c = x.c;
+        await DB.addActivity(c, 'memo', { text: '메시지 보냄', message: { channel: ch, ad, text: text.slice(0, 1000) } }, 'user', today());
+        c.lastActivityAt = today();
+        if (c.nextContact && c.nextContact.date <= today()) c.nextContact = null;
+        await DB.updateCustomer(c);
+        sent++; return true;
+      };
+      smsA.addEventListener('click', e => {
+        if (ad && !MsgDraft.adTimeOk()) { e.preventDefault(); return toast('밤 9시~아침 8시에는 광고를 보낼 수 없어요'); }
+        done('sms').then(ok => { if (ok) setTimeout(() => { i++; show(); }, 400); });   // 문자 앱이 열리는 건 그대로
+      });
+      m.querySelector('[data-ch=kakao]').addEventListener('click', () => done('kakao').then(ok => { if (ok) { i++; show(); } }));
+      m.querySelector('[data-skip]').addEventListener('click', () => { i++; show(); });
+    };
+    show();
+  }
+
   /** 엑셀 · CSV 가져오기: 붙여넣기 또는 파일 → 칸 자동 맞춤 → 미리보기 → 등록 */
   function importSheet() {
     const t = tpl();
@@ -502,6 +636,7 @@ const Sales = (() => {
     else if (k === 'open') openCard(el.dataset.id);
     else if (k === 'add') addCustomer();
     else if (k === 'import') importSheet();
+    else if (k === 'send') sendSheet();
     else if (k === 'reload') { DB.loaded = false; render(); DB.load().then(render); }
   }
 
@@ -517,7 +652,7 @@ const Sales = (() => {
   function dayReport(ymd, visits, who) {
     const name = id => { const c = S().customers.find(x => x.id === id); return c ? c.name : '고객'; };
     const acts = S().activities.filter(a => a.date === ymd).slice().reverse();
-    const calls = acts.filter(a => a.kind === 'call'), moves = acts.filter(a => a.kind === 'stage' && a.body.from), memos = acts.filter(a => a.kind === 'memo');
+    const calls = acts.filter(a => a.kind === 'call'), moves = acts.filter(a => a.kind === 'stage' && a.body.from), memos = acts.filter(a => a.kind === 'memo' && !a.body.message), msgs = acts.filter(a => a.kind === 'memo' && a.body.message);
     const tomorrow = U.addDays(ymd, 1);
     const dueT = due(1).filter(f => f.date === tomorrow);
     const d = U.at(ymd, '00:00');
@@ -525,9 +660,10 @@ const Sales = (() => {
     L.push(`■ 방문 ${visits.length}곳${visits.length ? ': ' + visits.map(v => `${v.start} ${v.title}`).join(' / ') : ''}`);
     L.push(`■ 통화 ${calls.length}건${calls.length ? ': ' + calls.map(a => `${name(a.customerId)}(${a.body.minutes || '?'}분${a.body.result ? ', ' + (RES[a.body.result] || '') : ''})`).join(', ') : ''}`);
     if (moves.length) L.push('■ 단계 이동: ' + moves.map(a => `${name(a.customerId)} ${a.body.from}→${a.body.to}`).join(', '));
+    if (msgs.length) L.push(`■ 메시지 ${msgs.length}명: ` + msgs.map(a => name(a.customerId)).join(', '));
     if (memos.length) L.push('■ 메모: ' + memos.slice(0, 6).map(a => `${name(a.customerId)} — ${a.body.text}`).join(' / '));
     L.push(`■ 내일: 다시 연락 ${dueT.length}명${dueT.length ? ' (' + dueT.map(f => f.name).join(', ') + ')' : ''}`);
-    return { text: L.join('\n'), counts: { visits: visits.length, calls: calls.length, moves: moves.length, memos: memos.length } };
+    return { text: L.join('\n'), counts: { visits: visits.length, calls: calls.length, moves: moves.length, memos: memos.length, msgs: msgs.length } };
   }
 
   /** 주문 받기 (거래처 순회형): 품목 · 금액 · 다음 납품일 → 방문 기록 + 다음 납품 알림 */
@@ -589,7 +725,7 @@ const Sales = (() => {
   }
 
   return {
-    dayReport, stats, typeOf, startPick: () => { picking = true; pickOpen = null; }, noun: () => typeOf().noun,
+    dayReport, stats, typeOf, openSend: g => sendSheet(g), startPick: () => { picking = true; pickOpen = null; }, noun: () => typeOf().noun,
     due, openCustomer: id => openCard(id), _checkReturn: () => checkReturn(),
     customer: id => S().customers.find(x => x.id === id) || null,
     templateName: () => (S().templateId ? tpl().name : ''),
