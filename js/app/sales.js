@@ -174,6 +174,7 @@ const Sales = (() => {
     if (el.dataset.sp === 'msg') { const c = S().customers.find(x => x.id === el.dataset.id); if (c) reviewSend([{ c, reason: reasonOf(c) }], 'care', ''); }
   }
 
+  const feat = k => !!(window.CEOP_CONFIG && CEOP_CONFIG.FEATURES && CEOP_CONFIG.FEATURES[k]);
   const adOk = c => !!(c.fields && c.fields.__ad && !c.fields.__optout);
   const RES = { good: '좋음', hold: '고민 중', later: '다시 연락', no: '거절' };
   const actText = a => a.kind === 'memo' && a.body.message ? `메시지 (${a.body.message.channel === 'sms' ? '문자' : '카톡'}${a.body.message.ad ? ' · 광고' : ''}) — ${a.body.message.text.replace(/\s+/g, ' ').slice(0, 40)}…`
@@ -208,10 +209,10 @@ const Sales = (() => {
       <form>${inputs}
         <label class="sp-field"><span>주소</span><input name="_address" maxlength="120" placeholder="동선 짤 때 써요" value="${esc(c.address || '')}"></label>
         <label class="sp-field"><span>생일</span><input name="_birthday" placeholder="MM-DD" value="${esc(c.birthday ? String(c.birthday).slice(-5) : '')}"></label>
-        <label class="sp-field"><span>광고 문자 수신</span><select name="_ad">
+        ${feat('adMessage') ? `<label class="sp-field"><span>광고 문자 수신</span><select name="_ad">
           <option value="">동의 안 받음</option>
           <option value="yes" ${adOk(c) ? 'selected' : ''}>동의함${adOk(c) ? ' (' + esc(c.fields.__ad) + ')' : ' (오늘 날짜로 기록)'}</option>
-          <option value="no" ${c.fields && c.fields.__optout ? 'selected' : ''}>수신 거부함</option></select></label>
+          <option value="no" ${c.fields && c.fields.__optout ? 'selected' : ''}>수신 거부함</option></select></label>` : ''}
         <label class="sp-field"><span>메모 남기기</span><input name="_memo" placeholder="예: 설계안 두 가지 비교 원함"></label>
         <div class="sp-err" aria-live="polite"></div>
         <div class="sp-actions">
@@ -234,8 +235,9 @@ const Sales = (() => {
       if (bad.length) { m.querySelector('.sp-err').textContent = '다시 확인해 주세요: ' + bad.join(', '); return; }
       const memo = String(fd.get('_memo') || '').trim();
       act(async () => {
-        const ad = String(fd.get('_ad') || '');
-        if (ad === 'yes') { if (!fields.__ad) fields.__ad = today(); delete fields.__optout; }
+        const ad = fd.has('_ad') ? String(fd.get('_ad') || '') : 'keep';
+        if (ad === 'keep') { /* 광고 칸이 꺼져 있으면 저장된 값 그대로 */ }
+        else if (ad === 'yes') { if (!fields.__ad) fields.__ad = today(); delete fields.__optout; }
         else if (ad === 'no') { delete fields.__ad; fields.__optout = today(); }
         else { delete fields.__ad; delete fields.__optout; }
         c.fields = fields; c.birthday = b || null; c.address = String(fd.get('_address') || '').trim().slice(0, 120);
@@ -469,9 +471,9 @@ const Sales = (() => {
     let gi = Math.max(0, groups.findIndex(x => x.id === (pre || 'due')));
     if (!pre && !groups[gi].items.length) gi = Math.max(0, groups.findIndex(x => x.items.length));
     const m = modal(`<h2>${esc(noun)}에게 메시지 보내기</h2>
-      <p class="sp-muted">누구에게 보낼지 고르면 AI가 사람마다 기록에 맞춰 다른 글을 써요. 한 명씩 확인하고 내 폰 문자 · 카톡으로 보내요.</p>
+      <p class="sp-muted">누구에게 보낼지 고르면 사람마다 기록에 맞춰 다른 글을 써 드려요. 한 명씩 확인하고 내 폰 문자 · 카톡으로 보내요.</p>
       <div class="sp-chips" data-groups>${groups.map((x, i) => `<button type="button" class="sp-chip ${i === gi ? 'on' : ''}" data-g="${i}" ${x.items.length ? '' : 'disabled'}>${esc(x.label)} <b>${x.items.length}</b></button>`).join('')}</div>
-      <fieldset class="sp-q"><legend>어떤 메시지인가요?</legend>
+      <fieldset class="sp-q" ${feat('adMessage') ? '' : 'hidden'}><legend>어떤 메시지인가요?</legend>
         <label class="sp-chk"><input type="radio" name="purpose" value="care" checked> <span><b>안부 · 일정 · 만기 안내</b><small>관계를 이어 가는 연락 — 누구에게나</small></span></label>
         <label class="sp-chk"><input type="radio" name="purpose" value="ad"> <span><b>상품 · 혜택 권유 (광고)</b><small>수신 동의한 ${esc(noun)}에게만 · (광고) 표시 자동 · 밤 9시~아침 8시 금지</small></span></label>
       </fieldset>
@@ -496,7 +498,7 @@ const Sales = (() => {
   }
   /** 서버 AI 초안 (켜져 있을 때만). 실패하면 null → 폰 안 기본 글 */
   async function aiDrafts(items, purpose, request) {
-    if (!(DB.live() && Store.client)) return null;
+    if (!feat('aiDraft') || !(DB.live() && Store.client)) return null;
     try {
       const t = tpl(), p = Store.profile() || {};
       const { data, error } = await Store.client.functions.invoke('sp-message-draft', { body: {
@@ -519,7 +521,7 @@ const Sales = (() => {
     const show = () => {
       if (i >= items.length) { closeModal(); render(); return toast(sent ? `${sent}명에게 보냈어요 · 고객 카드에 기록했어요` : '보낸 메시지가 없어요'); }
       const x = items[i], why = x.reason ? (x.reason.kind === 'birthday' ? '생일' : x.reason.task || '') : '';
-      m = modal(`<div class="sp-sendhead"><b>${i + 1} / ${items.length}</b><span>${ai ? 'AI 초안' : '기본 초안'}${ad ? ' · 광고' : ''}</span></div>
+      m = modal(`<div class="sp-sendhead"><b>${i + 1} / ${items.length}</b><span>${ai ? 'AI 초안' : '초안'}${ad ? ' · 광고' : ''}</span></div>
         <h2>${esc(x.c.name)} <small class="sp-muted">${esc(x.c.stage)}${why ? ' · ' + esc(why) : ''}</small></h2>
         <textarea class="sp-msgbox" rows="9">${esc(texts[i])}</textarea>
         <p class="sp-muted small">고쳐서 보내도 돼요. 금액 · 조건 같은 숫자는 직접 확인해 넣어 주세요.</p>
