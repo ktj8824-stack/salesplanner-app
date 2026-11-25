@@ -72,7 +72,18 @@ const App = {
 
   // 글자 크기 — 이 기기에만 저장 (보통 · 크게 · 아주, 기본 보통)
   size() { return this.SIZES[localStorage.getItem('CEOP_FONT')] ? localStorage.getItem('CEOP_FONT') : 'm'; },
-  applySize() { document.getElementById('root').style.zoom = this.SIZES[this.size()][1]; },
+  applySize() { this.fitZoom(document.getElementById('root'), this.SIZES[this.size()][1]); },
+  /** 글자 크게(zoom): 브라우저마다 '%' 너비를 키우는 방식이 달라서 (아이폰 사파리는 화면보다 넓어짐)
+   *  키운 뒤 화면을 넘치면 너비를 줄여 딱 맞춤 */
+  fitZoom(el, z) {
+    if (!el) return;
+    el.style.zoom = z; el.style.width = ''; el.style.maxWidth = '';
+    if (z === 1) return;
+    requestAnimationFrame(() => {
+      const w = el.getBoundingClientRect().width, vw = document.documentElement.clientWidth;
+      if (w > vw + 1) { el.style.width = (100 / z) + '%'; el.style.maxWidth = (560 / z) + 'px'; }
+    });
+  },
 
   /** 아이폰 · 안드로이드 앱 안: 알림은 폰이 직접 예약해요 (앱이 꺼져 있어도 울림). 웹은 브라우저 알림 */
   native() { return (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ceoAlarms) ? 'ios' : window.CEOAndroid ? 'android' : ''; },
@@ -549,7 +560,7 @@ const App = {
     back.innerHTML = `<div class="modal" role="dialog">${html}</div>`;
     // 글자 크게: 바깥 배경이 아니라 창 안쪽만 키움 (배경을 키우면 화면보다 넓어져 아이폰에서 옆이 잘림)
     const z = this.SIZES[this.size()][1], box = back.firstElementChild;
-    if (z !== 1) box.style.zoom = z;
+    if (z !== 1) this.fitZoom(box, z);
     back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
     document.body.appendChild(back);
     return back;
