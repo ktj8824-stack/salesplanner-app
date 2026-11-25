@@ -507,3 +507,12 @@ body.guide-open .ai-fab{display:none}
 .form-list input[type=date], .form-list input[type=time] { -webkit-appearance: none; appearance: none; min-height: 24px; display: block; }
 .form-list input::-webkit-date-and-time-value { text-align: right; }
 .modal { overflow-x: hidden; }
+/* 일정표 위 동선 한 줄 (전체 길안내 · 다음 장소 · 짧은 순서) */
+.route-bar { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-m); background: var(--surface); border: 1px solid var(--line); }
+.route-bar .rb-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
+.route-bar .rb-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.route-bar a { text-decoration: none; font-size: 13px; font-weight: 700; padding: 7px 11px; border-radius: 10px; white-space: nowrap; }
+.route-bar .rb-go { background: var(--navy); color: #fff; }
+.route-bar .rb-next { border: 1px solid var(--line); color: var(--ink); }
+.route-bar .rb-tip { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); background: #faf6ec; border-radius: 8px; padding: 7px 9px; }
+.route-bar .rb-tip.muted { background: transparent; padding: 0; color: var(--slate); }

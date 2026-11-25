@@ -164,7 +164,6 @@ const App = {
       ${showRep ? `<section class="sp-card"><h2>오늘 마감 보고서 <span class="sp-muted">자동 작성</span></h2><p class="sp-brief">방문 <b>${rep.counts.visits}</b> · 통화 <b>${rep.counts.calls}</b> · 단계 이동 <b>${rep.counts.moves}</b> · 메모 <b>${rep.counts.memos}</b></p><button class="sp-btn sp-dark" data-report style="width:100%;margin-top:8px">보고서 보기 · 보내기</button></section>` : ''}
       <section class="sp-card"><h2>오늘 브리핑 <span class="sp-muted">${U.esc(Sales.templateName())}</span></h2><p class="sp-brief">${line}${tip}</p></section>
       ${this.typeCards()}
-      ${this.routeStops().length >= 2 ? '<section class="sp-card sp-route" id="spRoute"><h2>오늘 동선</h2><p class="sp-muted">동선 계산 중…</p></section>' : ''}
       ${due.length ? `<section class="sp-card"><h2>다시 연락할 ${U.esc(Sales.noun())} <span class="sp-muted">3일 안</span></h2>
         ${due.slice(0, 4).map(f => `<button class="sp-due ${f.overdue ? 'late' : ''}" data-opencust="${U.esc(f.customerId)}"><b>${U.esc(f.date.slice(5).replace('-', '.'))}</b><span>${U.esc(f.name)} — ${U.esc(f.task)}</span>${f.overdue ? '<em>지남</em>' : ''}</button>`).join('')}
         <button class="sp-btn sp-gold sp-wide" data-sendmsg="due">${due.length}명에게 메시지 한 번에 보내기</button>
@@ -213,28 +212,39 @@ const App = {
     const c = s.briefing && s.briefing.customerId && typeof Sales !== 'undefined' ? Sales.customer(s.briefing.customerId) : null;
     return String((c && c.address) || s.location || '').trim();
   },
-  /** 홈 '오늘 동선' 카드 채우기 (좌표 찾기가 비동기라 그린 뒤에 채움) */
+  /** 오늘 동선 계산 (주소 좌표 → 구간 거리 · 이동 시간). 결과는 아래 일정표에 합쳐서 보여 줌
+   *  좌표 찾기가 비동기라 그린 뒤 계산하고, 값이 바뀌었을 때만 한 번 더 그림 */
   async fillRoute() {
-    const box = document.getElementById('spRoute'); if (!box) return;
+    if (this.tab !== 'home' || this.view === 'calendar' || this.day !== U.today() || typeof DayRoute === 'undefined') return;
+    const stops = this.routeStops();
+    if (stops.length < 2) { if (this._route) { this._route = null; this._routeKey = ''; this.render(); } return; }
     const seq = (this._routeSeq = (this._routeSeq || 0) + 1);
-    let r;
-    try { r = await DayRoute.plan(this.routeStops(), s => this.placeOf(s)); } catch { r = null; }
-    const el = document.getElementById('spRoute'); if (!el || seq !== this._routeSeq) return;
-    if (!r || !r.items.length) { el.remove(); return; }
+    let r = null;
+    try { r = await DayRoute.plan(stops, s => this.placeOf(s)); } catch { r = null; }
+    if (seq !== this._routeSeq) return;
+    const key = r ? JSON.stringify([r.items.map(x => [x.s.id, x.leg && x.leg.km, x.leg && x.leg.min]), r.better && r.better.saveKm]) : '';
+    if (key === this._routeKey) return;
+    this._routeKey = key; this._route = r; this.render();
+  },
+  /** 일정 id → 앞 장소에서 오는 실제 구간 { km, min } (오늘만) */
+  routeLegs() {
+    const out = {};
+    if (this._route && this.day === U.today()) this._route.items.forEach(x => { if (x.leg) out[x.s.id] = x.leg; });
+    return out;
+  },
+  /** 일정표 위 한 줄: 전체 길안내 · 다음 장소 · 더 짧은 순서 */
+  routeBar() {
+    const r = this._route; if (!r || this.day !== U.today() || r.items.length < 2) return '';
     const total = r.items.reduce((n, x) => n + (x.leg ? x.leg.km : 0), 0);
-    const now = new Date(), next = r.items.find(x => U.at(x.s.date, x.s.start) > now) || r.items[r.items.length - 1];
-    const nav = DayRoute.naverApp(r.items);
-    el.innerHTML = `<h2>오늘 동선 <span class="sp-muted">${r.items.length}곳${total ? ' · 약 ' + total.toFixed(1) + 'km' : ''}</span></h2>
-      <ol class="sp-stops">${r.items.map((x, i) => `${x.leg ? `<li class="sp-leg ${x.leg.tight ? 'tight' : ''}">${x.leg.km}km · 약 ${x.leg.min}분${x.leg.tight ? ` — <b>빠듯해요</b> (틈 ${Math.max(0, x.leg.gap)}분) <button class="sp-link" data-adjust="${U.esc(x.s.id)}" data-prev="${U.esc(r.items[i - 1].s.id)}">조정 요청</button>` : ''}</li>` : ''}
-        <li class="sp-stop ${x === next ? 'next' : ''}"><b>${U.esc(x.s.start)}</b><span>${U.esc(x.s.title)}<small>${U.esc(x.place)}${x.geo ? '' : ' · 위치 못 찾음'}</small></span></li>`).join('')}</ol>
-      ${r.better ? `<p class="sp-tipline">약속을 옮길 수 있다면 이 순서가 약 <b>${r.better.saveKm}km</b> 짧아요: ${r.better.order.map(U.esc).join(' → ')}</p>` : ''}
-      ${r.missing.length ? `<p class="sp-muted">위치를 못 찾은 곳은 고객 카드에 주소를 넣으면 다음부터 계산돼요</p>` : ''}
-      <div class="sp-actions">${nav ? `<a class="sp-btn sp-dark" href="${U.esc(nav)}">네이버 지도로 전체 길안내</a>` : ''}<a class="sp-btn" target="_blank" rel="noopener" href="${U.esc(DayRoute.webTo(next))}">다음 장소 길찾기</a></div>`;
-    el.querySelectorAll('[data-adjust]').forEach(b => b.addEventListener('click', async () => {
-      const nb = Store.get(b.dataset.adjust), a = Store.get(b.dataset.prev); if (!nb || !a) return;
-      try { await Store.send(`'${a.title}' 끝나고 '${nb.title}'까지 이동 시간이 부족해요. 조정해 주세요.`, { ref: nb.id }); U.toast('팀장에게 조정을 요청했어요'); }
-      catch (e) { U.toast('보내지 못했어요: ' + (e.message || e)); }
-    }));
+    const now = new Date(), next = r.items.find(x => U.at(x.s.date, x.s.start) > now);
+    if (!next) return '';   // 오늘 들를 곳을 다 지났으면 길안내 줄은 숨김
+    const nav = DayRoute.naverApp(r.items.filter(x => U.at(x.s.date, x.s.start) >= U.at(next.s.date, next.s.start) || x === r.items[0]));
+    return `<div class="route-bar">
+        <div class="rb-top"><span>${Icon.svg('pin', 14)} ${r.items.length}곳${total ? ' · 약 ' + total.toFixed(1) + 'km' : ''}</span>
+          <span class="rb-btns">${nav ? `<a class="rb-go" href="${U.esc(nav)}">전체 길안내</a>` : ''}<a class="rb-next" target="_blank" rel="noopener" href="${U.esc(DayRoute.webTo(next))}">다음 장소</a></span></div>
+        ${r.better && r.items.every(x => U.at(x.s.date, x.s.start) > now) ? `<p class="rb-tip">약속을 옮길 수 있다면 이 순서가 약 <b>${r.better.saveKm}km</b> 짧아요: ${r.better.order.map(U.esc).join(' → ')}</p>` : ''}
+        ${r.missing.length ? '<p class="rb-tip muted">위치를 못 찾은 곳은 고객 카드에 주소를 넣으면 다음부터 계산돼요</p>' : ''}
+      </div>`;
   },
 
   /** 기사님 최근 상태 한 줄 (대기 중 · 출발 · 현장 도착) + 출발했으면 도착 예상 · 늦을 것 같으면 경고 */
@@ -355,18 +365,20 @@ const App = {
   dayList() {
     const isToday = this.day === U.today();
     const list = this.dayPlan(this.day);
-    const warns = Backtime.conflictsOn(Store.list(), this.day);
+    const legs = this.routeLegs();   // 실제 주소 거리로 잰 이동 시간이 있으면 그 값으로 (동선 계산과 같은 숫자)
+    const warns = Backtime.conflictsOn(Store.list().map(x => legs[x.id] ? { ...x, travelMin: legs[x.id].min } : x), this.day);
     const now = new Date();
     const next = this.next();
     const head = `<div class="list-head">
         ${isToday ? '' : `<button class="link" data-today>${Icon.svg('left', 16)} 오늘</button>`}
         <h2>${isToday ? '오늘' : this.dateTitle(this.day)} ${list.length}건</h2>
-        <button class="link" data-view="calendar">캘린더 ${Icon.svg('chevron', 16)}</button></div>`;
+        <button class="link" data-view="calendar">캘린더 ${Icon.svg('chevron', 16)}</button></div>${isToday ? this.routeBar() : ''}`;
     const rows = list.map(({ s, p }, i) => {
       const w = warns.find(x => x.b.id === s.id);
       let gap = '';
       if (i > 0) {
         if (w) gap = this.conflictGap(w);
+        else if (legs[s.id] && s.mode !== 'none') gap = `<span></span><div class="tl-gap move">${Icon.mode(s.mode, 14)} ${legs[s.id].km}km · 약 ${legs[s.id].min}분 · ${U.esc((Backtime.MODES[s.mode] || {}).label || '')}</div>`;
         else if (s.mode !== 'none' && s.travelMin) { const adj = this.adjustedTo(s.id); gap = `<span></span><div class="tl-gap move">${Icon.mode(s.mode, 14)} 이동 ${U.durLabel(s.travelMin)} · ${U.esc((Backtime.MODES[s.mode] || {}).label || '')}${adj ? ` <b class="adj">${Icon.svg('check', 12)} ${adj}${adj.slice(-2) === '00' || adj.endsWith('5') ? '로' : '으로'} 조정됨</b>` : ''}</div>`; }
         else gap = '<span></span><div class="tl-gap"></div>';
       } else if (w) gap = this.conflictGap(w);

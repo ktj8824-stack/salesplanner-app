@@ -28,7 +28,7 @@
   /** 대략 이동 분 (차 기준). 걸어갈 거리(1km 안)는 도보로 */
   function minutes(d, mode) {
     if (mode === 'walk' || d < 1) return Math.max(3, Math.round(d * ROAD / 4.5 * 60));
-    return Math.max(5, Math.round(d * ROAD / CITY_KMH * 60) + 5);   // +5분: 주차 · 엘리베이터
+    return Math.max(5, Math.round(d * ROAD / CITY_KMH * 60));   // 운전 시간만 (주차 · 일찍 도착 여유는 일정표 역산이 따로 더함)
   }
   const toMin = hm => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + m; };
 
