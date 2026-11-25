@@ -502,3 +502,8 @@ nav.tabs .mic-tab > span:last-child { transform: translateY(16px); }
 body.guide-open .ai-fab{display:none}
 /* 로그아웃: 다른 메뉴 줄과 같은 크기 (작은 글자 링크였던 것) */
 .set-row.logout-row { border-top: 0; justify-content: center; color: var(--red, #B4442E); font-weight: 700; }
+/* 아이폰: 날짜 · 시간 칸이 제 너비를 고집해 창이 옆으로 밀리지 않게 */
+.form-list label > input { flex: 0 1 55%; min-width: 0; }
+.form-list input[type=date], .form-list input[type=time] { -webkit-appearance: none; appearance: none; min-height: 24px; display: block; }
+.form-list input::-webkit-date-and-time-value { text-align: right; }
+.modal { overflow-x: hidden; }

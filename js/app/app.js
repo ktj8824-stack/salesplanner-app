@@ -547,7 +547,9 @@ const App = {
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal" role="dialog">${html}</div>`;
-    back.style.zoom = this.SIZES[this.size()][1];
+    // 글자 크게: 바깥 배경이 아니라 창 안쪽만 키움 (배경을 키우면 화면보다 넓어져 아이폰에서 옆이 잘림)
+    const z = this.SIZES[this.size()][1], box = back.firstElementChild;
+    if (z !== 1) box.style.zoom = z;
     back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
     document.body.appendChild(back);
     return back;
